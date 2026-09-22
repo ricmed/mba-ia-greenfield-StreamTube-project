@@ -10,13 +10,23 @@ import {
   NotVideoOwnerException,
   UnsupportedMediaTypeException,
   UploadNotInProgressException,
+  UploadSizeMismatchException,
   VideoNotFoundException,
 } from '../common/exceptions/domain.exception';
 import { originalKey } from '../storage/storage.constants';
-import { PresignedPart, StorageService } from '../storage/storage.service';
+import {
+  CompletedPart,
+  PresignedPart,
+  StorageService,
+} from '../storage/storage.service';
 import { CreateVideoDto } from './dto/create-video.dto';
-import { Video, VideoProcessingStatus, VideoStatus } from './entities/video.entity';
+import {
+  Video,
+  VideoProcessingStatus,
+  VideoStatus,
+} from './entities/video.entity';
 import { persistWithUniquePublicId } from './public-id.util';
+import { VideoProcessingProducer } from './video-processing.producer';
 
 export interface CreatedDraft {
   video: Video;
@@ -31,6 +41,7 @@ export class VideosService {
     private readonly videoRepository: Repository<Video>,
     private readonly channelsService: ChannelsService,
     private readonly storageService: StorageService,
+    private readonly producer: VideoProcessingProducer,
     @Inject(storageConfig.KEY)
     private readonly storage: ConfigType<typeof storageConfig>,
   ) {}
@@ -40,7 +51,10 @@ export class VideosService {
    * (phase-03-videos/TD-02, phase-03-videos/TD-08). No video bytes touch the
    * API — the client uploads each part straight to the storage.
    */
-  async createDraft(userId: string, dto: CreateVideoDto): Promise<CreatedDraft> {
+  async createDraft(
+    userId: string,
+    dto: CreateVideoDto,
+  ): Promise<CreatedDraft> {
     if (dto.size_bytes > this.storage.maxUploadSizeBytes) {
       throw new FileTooLargeException();
     }
@@ -107,6 +121,69 @@ export class VideosService {
       video.upload_id!,
       partNumbers,
     );
+  }
+
+  /**
+   * Closes the multipart upload, verifies the assembled object and hands the
+   * video over to the processing queue (phase-03-videos/TD-02,
+   * phase-03-videos/TD-08).
+   *
+   * Idempotent by contract: calling it again on a video already in
+   * `processing` just re-enqueues (the job id is the video id, so the queue
+   * deduplicates), which is what makes a failed enqueue recoverable by a
+   * client retry.
+   */
+  async completeUpload(
+    userId: string,
+    publicId: string,
+    parts: CompletedPart[],
+  ): Promise<Video> {
+    const video = await this.findOwnedVideoOrFail(userId, publicId);
+
+    if (video.processing_status === VideoProcessingStatus.PROCESSING) {
+      await this.producer.enqueueProcessing(video.id);
+      return video;
+    }
+
+    this.assertUploadInProgress(video);
+
+    await this.storageService.completeMultipartUpload(
+      video.storage_key,
+      video.upload_id!,
+      parts,
+    );
+
+    const { contentLength } = await this.storageService.headObject(
+      video.storage_key,
+    );
+    if (
+      video.size_bytes !== null &&
+      contentLength !== Number(video.size_bytes)
+    ) {
+      throw new UploadSizeMismatchException();
+    }
+
+    video.processing_status = VideoProcessingStatus.PROCESSING;
+    video.upload_id = null;
+    const saved = await this.videoRepository.save(video);
+
+    // Enqueue only after the state change is durable: a job picked up before
+    // the commit would read a row still marked `uploading`.
+    await this.producer.enqueueProcessing(saved.id);
+
+    return saved;
+  }
+
+  /** Cancels an upload in progress and discards the draft (phase-03-videos/TD-02). */
+  async abortUpload(userId: string, publicId: string): Promise<void> {
+    const video = await this.findOwnedVideoOrFail(userId, publicId);
+    this.assertUploadInProgress(video);
+
+    await this.storageService.abortMultipartUpload(
+      video.storage_key,
+      video.upload_id!,
+    );
+    await this.videoRepository.delete({ id: video.id });
   }
 
   async findByPublicIdOrFail(publicId: string): Promise<Video> {

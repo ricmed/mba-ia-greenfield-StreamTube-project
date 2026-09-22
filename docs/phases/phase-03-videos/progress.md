@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 7/14 completed
+**SIs:** 8/14 completed
 
 ### SI-03.1 — Infraestrutura: dependências, configuração e serviços no Compose
 - **Status:** completed
@@ -65,9 +65,12 @@
   - Follow-up fora de escopo: `videos.module.spec.ts` leva ~51s e abre conexões reais, o que pelo contrato de sufixos seria `.integration-spec.ts`. Mantido como `.spec.ts` por ser o padrão já estabelecido pelos módulos da fase 02 (auth, channels, users).
 
 ### SI-03.8 — Conclusão e cancelamento do upload
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 39/39 passing (videos.service.spec.ts 17, videos.service.integration-spec.ts 5, videos.e2e-spec.ts 17)
+- **Observations:**
+  - As chamadas ao storage ficam **fora** de transação do banco; a mudança de estado é um único `save` (atômico por si) e o enqueue vem depois. O plano descrevia tudo "em transação", mas segurar uma transação do Postgres aberta durante I/O externo (complete + head no S3) prenderia conexão por segundos. Há teste garantindo a ordem `save` → `enqueue`.
+  - Idempotência: chamar complete de novo num vídeo já em `processing` apenas reenfileira (dedup por `jobId`), sem refazer o `CompleteMultipartUpload`.
+  - **Limitação conhecida do caminho 422:** quando o tamanho não bate, o vídeo permanece em `uploading` conforme o contrato, mas o multipart já foi consumido pelo `CompleteMultipartUpload` — o cliente precisa iniciar um upload novo. O e2e documenta o estado (assinar parte ainda responde 200).
 
 ### SI-03.9 — Worker de vídeo: entrypoint, processor e FFmpeg
 - **Status:** pending

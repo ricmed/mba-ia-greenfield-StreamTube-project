@@ -243,4 +243,168 @@ describe('Videos (e2e)', () => {
         .expect(400);
     });
   });
+
+  describe('upload completion and cancellation', () => {
+    const PART_SIZE = 5 * 1024 * 1024;
+
+    async function uploadOnePart(
+      accessToken: string,
+      body: Buffer,
+    ): Promise<{ publicId: string; etag: string }> {
+      const draft = await request(app.getHttpServer())
+        .post('/videos')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ ...VALID_BODY, size_bytes: body.length })
+        .expect(201);
+
+      const publicId = (draft.body as { id: string }).id;
+
+      const signed = await request(app.getHttpServer())
+        .post(`/videos/${publicId}/upload/parts`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ part_numbers: [1] })
+        .expect(200);
+
+      const url = (signed.body as { parts: { url: string }[] }).parts[0].url;
+      const upload = await fetchSignedUrl(url, { method: 'PUT', body });
+      expect(upload.status).toBe(200);
+
+      return { publicId, etag: upload.headers.get('etag')! };
+    }
+
+    it('should return 200 and move the video to processing', async () => {
+      const accessToken = await authenticate();
+      const { publicId, etag } = await uploadOnePart(
+        accessToken,
+        Buffer.alloc(PART_SIZE, 'a'),
+      );
+
+      const response = await request(app.getHttpServer())
+        .post(`/videos/${publicId}/upload/complete`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ parts: [{ part_number: 1, etag }] })
+        .expect(200);
+
+      expect(response.body.id).toBe(publicId);
+      expect(response.body.status).toBe('draft');
+      expect(response.body.processing_status).toBe('processing');
+    });
+
+    it('should return 200 on a repeated completion (idempotent)', async () => {
+      const accessToken = await authenticate();
+      const { publicId, etag } = await uploadOnePart(
+        accessToken,
+        Buffer.alloc(PART_SIZE, 'b'),
+      );
+      const body = { parts: [{ part_number: 1, etag }] };
+
+      await request(app.getHttpServer())
+        .post(`/videos/${publicId}/upload/complete`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send(body)
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .post(`/videos/${publicId}/upload/complete`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send(body)
+        .expect(200);
+    });
+
+    it('should return 422 when the assembled size differs from the declared one', async () => {
+      const accessToken = await authenticate();
+
+      // Declares 10 MiB but uploads a single 5 MiB part.
+      const draft = await request(app.getHttpServer())
+        .post('/videos')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ ...VALID_BODY, size_bytes: PART_SIZE * 2 })
+        .expect(201);
+      const publicId = (draft.body as { id: string }).id;
+
+      const signed = await request(app.getHttpServer())
+        .post(`/videos/${publicId}/upload/parts`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ part_numbers: [1] })
+        .expect(200);
+
+      const url = (signed.body as { parts: { url: string }[] }).parts[0].url;
+      const upload = await fetchSignedUrl(url, {
+        method: 'PUT',
+        body: Buffer.alloc(PART_SIZE, 'c'),
+      });
+
+      const response = await request(app.getHttpServer())
+        .post(`/videos/${publicId}/upload/complete`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({
+          parts: [{ part_number: 1, etag: upload.headers.get('etag')! }],
+        })
+        .expect(422);
+
+      expect(response.body.error).toBe('UPLOAD_SIZE_MISMATCH');
+
+      const stillUploading = await request(app.getHttpServer())
+        .post(`/videos/${publicId}/upload/parts`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ part_numbers: [2] });
+      expect(stillUploading.status).toBe(200);
+    });
+
+    it('should return 400 when parts entries are malformed', async () => {
+      const accessToken = await authenticate();
+      const { publicId } = await uploadOnePart(
+        accessToken,
+        Buffer.alloc(PART_SIZE, 'd'),
+      );
+
+      await request(app.getHttpServer())
+        .post(`/videos/${publicId}/upload/complete`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ parts: [{ part_number: 1 }] })
+        .expect(400);
+    });
+
+    it('should return 204 and drop the draft on abort', async () => {
+      const accessToken = await authenticate();
+      const draft = await request(app.getHttpServer())
+        .post('/videos')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send(VALID_BODY)
+        .expect(201);
+      const publicId = (draft.body as { id: string }).id;
+
+      await request(app.getHttpServer())
+        .delete(`/videos/${publicId}/upload`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(204);
+
+      await request(app.getHttpServer())
+        .post(`/videos/${publicId}/upload/parts`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ part_numbers: [1] })
+        .expect(404);
+    });
+
+    it('should return 409 when aborting a video that is already processing', async () => {
+      const accessToken = await authenticate();
+      const { publicId, etag } = await uploadOnePart(
+        accessToken,
+        Buffer.alloc(PART_SIZE, 'e'),
+      );
+
+      await request(app.getHttpServer())
+        .post(`/videos/${publicId}/upload/complete`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ parts: [{ part_number: 1, etag }] })
+        .expect(200);
+
+      const response = await request(app.getHttpServer())
+        .delete(`/videos/${publicId}/upload`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(409);
+
+      expect(response.body.error).toBe('UPLOAD_NOT_IN_PROGRESS');
+    });
+  });
 });

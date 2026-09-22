@@ -6,12 +6,14 @@ import {
   NotVideoOwnerException,
   UnsupportedMediaTypeException,
   UploadNotInProgressException,
+  UploadSizeMismatchException,
   VideoNotFoundException,
 } from '../common/exceptions/domain.exception';
 import storageConfig from '../config/storage.config';
 import { StorageService } from '../storage/storage.service';
 import { CreateVideoDto } from './dto/create-video.dto';
 import { Video, VideoProcessingStatus } from './entities/video.entity';
+import { VideoProcessingProducer } from './video-processing.producer';
 import { VideosService } from './videos.service';
 
 const MAX_SIZE = 10_737_418_240;
@@ -27,19 +29,28 @@ const validDto = (overrides: Partial<CreateVideoDto> = {}): CreateVideoDto => ({
 
 describe('VideosService', () => {
   let service: VideosService;
-  let repository: { create: jest.Mock; save: jest.Mock; findOneBy: jest.Mock };
+  let repository: {
+    create: jest.Mock;
+    save: jest.Mock;
+    findOneBy: jest.Mock;
+    delete: jest.Mock;
+  };
   let channels: { findByUserId: jest.Mock };
   let storage: {
     createMultipartUpload: jest.Mock;
     abortMultipartUpload: jest.Mock;
     presignUploadParts: jest.Mock;
+    completeMultipartUpload: jest.Mock;
+    headObject: jest.Mock;
   };
+  let producer: { enqueueProcessing: jest.Mock };
 
   beforeEach(async () => {
     repository = {
       create: jest.fn((entity) => entity),
       save: jest.fn((entity) => Promise.resolve(entity)),
       findOneBy: jest.fn(),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     channels = {
       findByUserId: jest.fn().mockResolvedValue({ id: 'channel-1' }),
@@ -48,7 +59,10 @@ describe('VideosService', () => {
       createMultipartUpload: jest.fn().mockResolvedValue('upload-1'),
       abortMultipartUpload: jest.fn().mockResolvedValue(undefined),
       presignUploadParts: jest.fn().mockResolvedValue([]),
+      completeMultipartUpload: jest.fn().mockResolvedValue(undefined),
+      headObject: jest.fn(),
     };
+    producer = { enqueueProcessing: jest.fn().mockResolvedValue(undefined) };
 
     const module = await Test.createTestingModule({
       providers: [
@@ -56,6 +70,7 @@ describe('VideosService', () => {
         { provide: getRepositoryToken(Video), useValue: repository },
         { provide: ChannelsService, useValue: channels },
         { provide: StorageService, useValue: storage },
+        { provide: VideoProcessingProducer, useValue: producer },
         {
           provide: storageConfig.KEY,
           useValue: {
@@ -190,6 +205,131 @@ describe('VideosService', () => {
       await expect(
         service.signUploadParts('user-1', 'abcdefghijk', [1]),
       ).rejects.toBeInstanceOf(UploadNotInProgressException);
+    });
+  });
+
+  describe('completeUpload', () => {
+    const uploadingVideo = () =>
+      ({
+        id: 'video-1',
+        public_id: 'abcdefghijk',
+        channel_id: 'channel-1',
+        storage_key: 'videos/video-1/original',
+        upload_id: 'upload-1',
+        size_bytes: '1024',
+        processing_status: VideoProcessingStatus.UPLOADING,
+      }) as Video;
+
+    const parts = [{ partNumber: 1, etag: 'etag-1' }];
+
+    it('should complete the upload, flip to processing and enqueue the job', async () => {
+      repository.findOneBy.mockResolvedValue(uploadingVideo());
+      storage.headObject.mockResolvedValue({ contentLength: 1024 });
+
+      const video = await service.completeUpload(
+        'user-1',
+        'abcdefghijk',
+        parts,
+      );
+
+      expect(storage.completeMultipartUpload).toHaveBeenCalledWith(
+        'videos/video-1/original',
+        'upload-1',
+        parts,
+      );
+      expect(video.processing_status).toBe(VideoProcessingStatus.PROCESSING);
+      expect(video.upload_id).toBeNull();
+      expect(producer.enqueueProcessing).toHaveBeenCalledWith('video-1');
+    });
+
+    it('should enqueue only after the state change was saved', async () => {
+      repository.findOneBy.mockResolvedValue(uploadingVideo());
+      storage.headObject.mockResolvedValue({ contentLength: 1024 });
+      const order: string[] = [];
+      repository.save.mockImplementation((entity) => {
+        order.push('save');
+        return Promise.resolve(entity);
+      });
+      producer.enqueueProcessing.mockImplementation(() => {
+        order.push('enqueue');
+        return Promise.resolve();
+      });
+
+      await service.completeUpload('user-1', 'abcdefghijk', parts);
+
+      expect(order).toEqual(['save', 'enqueue']);
+    });
+
+    it('should reject when the assembled object size differs from the declared one', async () => {
+      repository.findOneBy.mockResolvedValue(uploadingVideo());
+      storage.headObject.mockResolvedValue({ contentLength: 999 });
+
+      await expect(
+        service.completeUpload('user-1', 'abcdefghijk', parts),
+      ).rejects.toBeInstanceOf(UploadSizeMismatchException);
+
+      expect(producer.enqueueProcessing).not.toHaveBeenCalled();
+      expect(repository.save).not.toHaveBeenCalled();
+    });
+
+    it('should be idempotent: a second call on a processing video only re-enqueues', async () => {
+      repository.findOneBy.mockResolvedValue({
+        ...uploadingVideo(),
+        processing_status: VideoProcessingStatus.PROCESSING,
+        upload_id: null,
+      });
+
+      await service.completeUpload('user-1', 'abcdefghijk', parts);
+
+      expect(storage.completeMultipartUpload).not.toHaveBeenCalled();
+      expect(producer.enqueueProcessing).toHaveBeenCalledWith('video-1');
+    });
+
+    it('should reject completing a video that is already ready', async () => {
+      repository.findOneBy.mockResolvedValue({
+        ...uploadingVideo(),
+        processing_status: VideoProcessingStatus.READY,
+        upload_id: null,
+      });
+
+      await expect(
+        service.completeUpload('user-1', 'abcdefghijk', parts),
+      ).rejects.toBeInstanceOf(UploadNotInProgressException);
+    });
+  });
+
+  describe('abortUpload', () => {
+    it('should abort the multipart upload and delete the draft', async () => {
+      repository.findOneBy.mockResolvedValue({
+        id: 'video-1',
+        public_id: 'abcdefghijk',
+        channel_id: 'channel-1',
+        storage_key: 'videos/video-1/original',
+        upload_id: 'upload-1',
+        processing_status: VideoProcessingStatus.UPLOADING,
+      } as Video);
+
+      await service.abortUpload('user-1', 'abcdefghijk');
+
+      expect(storage.abortMultipartUpload).toHaveBeenCalledWith(
+        'videos/video-1/original',
+        'upload-1',
+      );
+      expect(repository.delete).toHaveBeenCalledWith({ id: 'video-1' });
+    });
+
+    it('should refuse to abort once processing started', async () => {
+      repository.findOneBy.mockResolvedValue({
+        id: 'video-1',
+        channel_id: 'channel-1',
+        processing_status: VideoProcessingStatus.PROCESSING,
+        upload_id: null,
+      } as Video);
+
+      await expect(
+        service.abortUpload('user-1', 'abcdefghijk'),
+      ).rejects.toBeInstanceOf(UploadNotInProgressException);
+      expect(repository.delete).not.toHaveBeenCalled();
     });
   });
 });
