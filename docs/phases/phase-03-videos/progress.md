@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 8/14 completed
+**SIs:** 9/14 completed
 
 ### SI-03.1 — Infraestrutura: dependências, configuração e serviços no Compose
 - **Status:** completed
@@ -73,9 +73,14 @@
   - **Limitação conhecida do caminho 422:** quando o tamanho não bate, o vídeo permanece em `uploading` conforme o contrato, mas o multipart já foi consumido pelo `CompleteMultipartUpload` — o cliente precisa iniciar um upload novo. O e2e documenta o estado (assinar parte ainda responde 200).
 
 ### SI-03.9 — Worker de vídeo: entrypoint, processor e FFmpeg
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 11/11 passing (ffmpeg.service.integration-spec.ts 4, video.processor.integration-spec.ts 6, worker.module.spec.ts 1)
+- **Observations:**
+  - **Bug de produção pego pelo teste:** o `WorkerModule` usava `autoLoadEntities: true`, mas o contexto do worker só registra `Video` via `forFeature`; a relação `Video → Channel → User` não resolvia e o `DataSource` morria no boot. Corrigido com lista explícita `entities: [Video, Channel, User]`. Verificado no container: `TypeOrmCoreModule dependencies initialized` agora passa e o worker loga "consuming the processing queue".
+  - O `video-worker` do Compose deixou de rodar `tail -f` e passou a executar `npm run start:worker:dev` (scripts `start:worker` e `start:worker:dev` adicionados). `RestartCount=0` após 9 minutos.
+  - Arquivo inválido usa `UnrecoverableError` do BullMQ: marca `failed` e **não** gasta as 3 tentativas. Erros transitórios continuam repetindo, e o `@OnWorkerEvent('failed')` só persiste a falha na última tentativa.
+  - Fixtures de vídeo são geradas em tempo de teste via `ffmpeg -f lavfi` (`src/test/video-fixture.ts`), sem binário versionado no repositório.
+  - **Follow-ups fora de escopo:** (1) o Jest não encerra após as suítes de integração (provável handle aberto de Redis/TypeORM), deixando processos órfãos no container; (2) o primeiro boot do worker leva ~6,5 min compilando no bind mount do Windows.
 
 ### SI-03.10 — GET /videos/:publicId: consulta do vídeo e do ciclo de status
 - **Status:** pending

@@ -23,7 +23,9 @@ services:
       dockerfile: Dockerfile.dev
     volumes:
       - .:/home/node/app
-    command: ["tail", "-f", "/dev/null"]
+    # The worker is a separate process from the API (TD-06); it consumes the
+    # queue as soon as the stack is up.
+    command: ["npm", "run", "start:worker:dev"]
     depends_on:
       db:
         condition: service_healthy
