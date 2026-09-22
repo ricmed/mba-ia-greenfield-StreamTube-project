@@ -7,11 +7,13 @@ import { ChannelsService } from '../channels/channels.service';
 import storageConfig from '../config/storage.config';
 import {
   FileTooLargeException,
+  NotVideoOwnerException,
   UnsupportedMediaTypeException,
+  UploadNotInProgressException,
   VideoNotFoundException,
 } from '../common/exceptions/domain.exception';
 import { originalKey } from '../storage/storage.constants';
-import { StorageService } from '../storage/storage.service';
+import { PresignedPart, StorageService } from '../storage/storage.service';
 import { CreateVideoDto } from './dto/create-video.dto';
 import { Video, VideoProcessingStatus, VideoStatus } from './entities/video.entity';
 import { persistWithUniquePublicId } from './public-id.util';
@@ -88,9 +90,52 @@ export class VideosService {
     }
   }
 
+  /**
+   * Signs one upload URL per requested part (phase-03-videos/TD-02). Also the
+   * resume path: expired URLs are re-signed by calling this again.
+   */
+  async signUploadParts(
+    userId: string,
+    publicId: string,
+    partNumbers: number[],
+  ): Promise<PresignedPart[]> {
+    const video = await this.findOwnedVideoOrFail(userId, publicId);
+    this.assertUploadInProgress(video);
+
+    return this.storageService.presignUploadParts(
+      video.storage_key,
+      video.upload_id!,
+      partNumbers,
+    );
+  }
+
   async findByPublicIdOrFail(publicId: string): Promise<Video> {
     const video = await this.videoRepository.findOneBy({ public_id: publicId });
     if (!video) throw new VideoNotFoundException();
     return video;
+  }
+
+  /** Resolves the video and asserts the caller's channel owns it. */
+  private async findOwnedVideoOrFail(
+    userId: string,
+    publicId: string,
+  ): Promise<Video> {
+    const video = await this.findByPublicIdOrFail(publicId);
+    const channel = await this.channelsService.findByUserId(userId);
+
+    if (!channel || channel.id !== video.channel_id) {
+      throw new NotVideoOwnerException();
+    }
+
+    return video;
+  }
+
+  private assertUploadInProgress(video: Video): void {
+    if (
+      video.processing_status !== VideoProcessingStatus.UPLOADING ||
+      !video.upload_id
+    ) {
+      throw new UploadNotInProgressException();
+    }
   }
 }

@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 5/14 completed
+**SIs:** 6/14 completed
 
 ### SI-03.1 — Infraestrutura: dependências, configuração e serviços no Compose
 - **Status:** completed
@@ -47,9 +47,13 @@
   - Limites de tamanho/MIME ficam no service (413/415 do Error Catalog), não no DTO — no DTO virariam 400 e quebrariam o contrato da API.
 
 ### SI-03.6 — POST /videos/:publicId/upload/parts: assinatura de partes sob demanda
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 21/21 passing (videos.service.spec.ts 10, videos.e2e-spec.ts 11)
+- **Observations:**
+  - O intervalo de `part_numbers` (1..10000, teto real do S3) é validado no DTO, e não no service: o filtro de validação só transforma `BadRequestException` em `VALIDATION_ERROR`, e a regra do projeto proíbe serviços lançarem exceções HTTP do Nest.
+  - O teto por vídeo (`part_count`) não é validado: assinar um número de parte não usado é inócuo, e o `CompleteMultipartUpload` valida o conjunto real. Estreitamento consciente do contrato.
+  - `findOwnedVideoOrFail` e `assertUploadInProgress` nasceram privados aqui e são reutilizados por SI-03.8 (complete/abort).
+  - O e2e envia bytes de verdade para a URL assinada e confere o `ETag` devolvido — é o que prova que a URL é utilizável pelo cliente.
 
 ### SI-03.7 — Fila de processamento: BullMQ, Redis e producer
 - **Status:** pending

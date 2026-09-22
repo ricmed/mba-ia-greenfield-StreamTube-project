@@ -1,8 +1,9 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { JwtPayload } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { CreateVideoDto } from './dto/create-video.dto';
+import { SignUploadPartsDto } from './dto/sign-upload-parts.dto';
 import { VideosService } from './videos.service';
 
 @ApiTags('videos')
@@ -37,6 +38,30 @@ export class VideosController {
         part_size: partSize,
         part_count: partCount,
       },
+    };
+  }
+
+  @Post(':publicId/upload/parts')
+  @HttpCode(HttpStatus.OK)
+  async signUploadParts(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Body() dto: SignUploadPartsDto,
+  ): Promise<{
+    parts: { part_number: number; url: string; expires_at: string }[];
+  }> {
+    const parts = await this.videosService.signUploadParts(
+      user.sub,
+      publicId,
+      dto.part_numbers,
+    );
+
+    return {
+      parts: parts.map((part) => ({
+        part_number: part.partNumber,
+        url: part.url,
+        expires_at: part.expiresAt.toISOString(),
+      })),
     };
   }
 }

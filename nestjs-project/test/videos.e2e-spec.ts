@@ -8,6 +8,7 @@ import { AppModule } from '../src/app.module';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
 import { cleanAllTables } from '../src/test/create-test-data-source';
+import { fetchSignedUrl } from '../src/test/signed-url';
 
 const VALID_BODY = {
   title: 'My first video',
@@ -149,6 +150,97 @@ describe('Videos (e2e)', () => {
         .expect(415);
 
       expect(response.body.error).toBe('UNSUPPORTED_MEDIA_TYPE');
+    });
+  });
+
+  describe('POST /videos/:publicId/upload/parts', () => {
+    async function createDraft(accessToken: string): Promise<string> {
+      const response = await request(app.getHttpServer())
+        .post('/videos')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send(VALID_BODY)
+        .expect(201);
+
+      return (response.body as { id: string }).id;
+    }
+
+    it('should return 200 with usable presigned part urls', async () => {
+      const accessToken = await authenticate();
+      const publicId = await createDraft(accessToken);
+
+      const response = await request(app.getHttpServer())
+        .post(`/videos/${publicId}/upload/parts`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ part_numbers: [1, 2] })
+        .expect(200);
+
+      const parts = (
+        response.body as {
+          parts: { part_number: number; url: string; expires_at: string }[];
+        }
+      ).parts;
+
+      expect(parts).toHaveLength(2);
+      expect(parts[0].url).not.toBe(parts[1].url);
+      expect(new Date(parts[0].expires_at).getTime()).toBeGreaterThan(
+        Date.now(),
+      );
+
+      // The URL really accepts the bytes and answers with an ETag.
+      const upload = await fetchSignedUrl(parts[0].url, {
+        method: 'PUT',
+        body: Buffer.alloc(5 * 1024 * 1024, 'a'),
+      });
+      expect(upload.status).toBe(200);
+      expect(upload.headers.get('etag')).toBeTruthy();
+    });
+
+    it('should return 403 when the caller does not own the video', async () => {
+      const ownerToken = await authenticate();
+      const publicId = await createDraft(ownerToken);
+      const otherToken = await authenticate();
+
+      const response = await request(app.getHttpServer())
+        .post(`/videos/${publicId}/upload/parts`)
+        .set('Authorization', `Bearer ${otherToken}`)
+        .send({ part_numbers: [1] })
+        .expect(403);
+
+      expect(response.body.error).toBe('NOT_VIDEO_OWNER');
+    });
+
+    it('should return 404 for an unknown public id', async () => {
+      const accessToken = await authenticate();
+
+      const response = await request(app.getHttpServer())
+        .post('/videos/doesnotexi/upload/parts')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ part_numbers: [1] })
+        .expect(404);
+
+      expect(response.body.error).toBe('VIDEO_NOT_FOUND');
+    });
+
+    it('should return 400 when part_numbers is empty', async () => {
+      const accessToken = await authenticate();
+      const publicId = await createDraft(accessToken);
+
+      await request(app.getHttpServer())
+        .post(`/videos/${publicId}/upload/parts`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ part_numbers: [] })
+        .expect(400);
+    });
+
+    it('should return 400 when a part number is out of range', async () => {
+      const accessToken = await authenticate();
+      const publicId = await createDraft(accessToken);
+
+      await request(app.getHttpServer())
+        .post(`/videos/${publicId}/upload/parts`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ part_numbers: [0] })
+        .expect(400);
     });
   });
 });
