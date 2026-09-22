@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 3/14 completed
+**SIs:** 4/14 completed
 
 ### SI-03.1 — Infraestrutura: dependências, configuração e serviços no Compose
 - **Status:** completed
@@ -30,9 +30,12 @@
   - O teste de revert agora cobre a última migration (CreateVideos), não mais as de token, porque a ordem mudou.
 
 ### SI-03.4 — VideosModule, exceções de domínio e geração do public_id
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 10/10 passing (public-id.util.spec.ts, videos.module.spec.ts)
+- **Observations:**
+  - O retry de colisão ficou como função pura (`persistWithUniquePublicId`) no util, e não dentro do service: assim o critério de aceite de colisão é testável no arquivo que o plano lista, sem inventar um spec fora do contrato.
+  - O detector de unique violation do pg está duplicado entre `public-id.util.ts` e `channels.service.ts`. Fora do escopo desta fase extrair para `src/common/`; fica anotado como follow-up.
+  - As 7 exceções novas foram acrescentadas ao `domain.exception.ts` existente, seguindo o formato herdado (`errorCode`, status, mensagem).
 
 ### SI-03.5 — POST /videos: pré-cadastro do rascunho e início do multipart
 - **Status:** pending
