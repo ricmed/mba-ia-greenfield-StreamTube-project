@@ -3,7 +3,7 @@ kind: phase
 name: phase-03-videos
 sources_mtime:
   docs/project-plan.md: "2026-09-18T17:16:04-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-09-22T14:28:40-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-09-22T15:02:57-03:00"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-09-18T17:24:37-03:00"
   docs/phases/phase-01-configuracao-base/context.md: "2026-09-18T17:24:37-03:00"
   docs/phases/phase-02-auth/context.md: "2026-09-18T17:24:37-03:00"
@@ -48,18 +48,18 @@ sources_mtime:
 
 | Ref | Source | Scope | Topic | Status | Decision | Libraries |
 |-----|--------|-------|-------|--------|----------|-----------|
-| phase-03-videos/TD-01 | phase | Backend | Tecnologia da fila de processamento | pending | — | — |
-| phase-03-videos/TD-02 | phase | Cross-layer | Estratégia de upload de arquivos de até 10GB | pending | — | — |
-| phase-03-videos/TD-03 | phase | Backend | Biblioteca cliente de object storage | pending | — | — |
-| phase-03-videos/TD-04 | phase | Cross-layer | Organização do storage e assinatura de URLs (endpoint interno vs público) | pending | — | — |
-| phase-03-videos/TD-05 | phase | Repo-wide | Imagem do storage S3-compatível no Compose | pending | — | — |
-| phase-03-videos/TD-06 | phase | Repo-wide | Topologia e runtime do worker de vídeo | pending | — | — |
-| phase-03-videos/TD-07 | phase | Backend | Invocação do FFmpeg/ffprobe e leitura do arquivo original | pending | — | — |
-| phase-03-videos/TD-08 | phase | Backend | Ciclo de status do vídeo, falhas e consistência fila ↔ banco | pending | — | — |
-| phase-03-videos/TD-09 | phase | Cross-layer | Identificador da URL única do vídeo | pending | — | — |
-| phase-03-videos/TD-10 | phase | Cross-layer | Entrega do vídeo — streaming e download | pending | — | — |
-| phase-03-videos/TD-11 | phase | Cross-layer | Acesso a streaming e download nesta fase | pending | — | — |
-| phase-03-videos/TD-12 | phase | Backend | Estratégia de testes para storage, fila e worker | pending | — | — |
+| phase-03-videos/TD-01 | phase | Backend | Tecnologia da fila de processamento | decided | A (BullMQ + Redis via `@nestjs/bullmq`) | @nestjs/bullmq, bullmq |
+| phase-03-videos/TD-02 | phase | Cross-layer | Estratégia de upload de arquivos de até 10GB | decided | C (Multipart presigned direto ao storage) | — |
+| phase-03-videos/TD-03 | phase | Backend | Biblioteca cliente de object storage | decided | A (AWS SDK v3) | @aws-sdk/client-s3, @aws-sdk/s3-request-presigner |
+| phase-03-videos/TD-04 | phase | Cross-layer | Organização do storage e assinatura de URLs (endpoint interno vs público) | decided | A (Bucket privado único + endpoints interno/público) | — |
+| phase-03-videos/TD-05 | phase | Repo-wide | Imagem do storage S3-compatível no Compose | decided | A (Chainguard MinIO, fixado por digest) | — |
+| phase-03-videos/TD-06 | phase | Repo-wide | Topologia e runtime do worker de vídeo | decided | A (Mesmo codebase, entrypoint e container próprios) | — |
+| phase-03-videos/TD-07 | phase | Backend | Invocação do FFmpeg/ffprobe e leitura do arquivo original | decided | A (ffmpeg do sistema via `execFile` + URL presigned interna) | — |
+| phase-03-videos/TD-08 | phase | Backend | Ciclo de status do vídeo, falhas e consistência fila ↔ banco | decided | B (`status` editorial + `processing_status` técnico) | — |
+| phase-03-videos/TD-09 | phase | Cross-layer | Identificador da URL única do vídeo | decided | B (ID curto 64 bits via `node:crypto` + UNIQUE + retry) | — |
+| phase-03-videos/TD-10 | phase | Cross-layer | Entrega do vídeo — streaming e download | decided | B (302 para presigned GET; Range/206 nativo do storage) | — |
+| phase-03-videos/TD-11 | phase | Cross-layer | Acesso a streaming e download nesta fase | decided | A (Público para vídeos `ready` via ID não adivinhável) | — |
+| phase-03-videos/TD-12 | phase | Backend | Estratégia de testes para storage, fila e worker | decided | A (Infra real + worker no processo do teste) | — |
 
 _`Renders in` column omitted: no TD in the kept set sets the field explicitly._
 
@@ -83,7 +83,65 @@ _Source files:_
 
 ## Decisions Detail
 
-_No decided TDs yet — all 12 TDs of `phase-03-videos` carry `**Decision:** _[pending]_`. `/plan-resolve 03` fills them._
+### phase-03-videos/TD-01
+
+**Recommendation:** é o único caminho com integração oficial do NestJS 11 que entrega retries/backoff, estado por job e deduplicação por `jobId` sem código de infraestrutura próprio, e materializa o container `Message Queue` previsto no diagrama. O dual write é tratado por enqueue pós-commit com `jobId = videoId` e reenfileiramento idempotente (TD-08). Imagem sugerida: `redis:8-alpine` com `--maxmemory-policy noeviction --appendonly yes`.
+**Libraries:** @nestjs/bullmq, bullmq
+
+### phase-03-videos/TD-02
+
+**Recommendation:** é a única opção que atende simultaneamente 10GB (acima do teto de 5 GiB do PUT único) e "sem impacto na performance" (a API só troca metadados). Políticas do contrato, configuráveis por env e validadas pelo Joi: tamanho máximo `10 GiB = 10737418240` bytes (declarado no início e conferido via `HeadObject` após o complete); parte fixa de `64 MiB`; expiração das URLs de parte de 1h, com endpoint de assinatura sob demanda para renovar e retomar; MIME `video/*` declarado pelo cliente e validado de fato pelo ffprobe no worker; CORS do storage expondo `ETag`. Depende de TD-03 e TD-04.
+**Libraries:** —
+
+### phase-03-videos/TD-03
+
+**Recommendation:** o TD-02 exige presign de `UploadPart` e `CompleteMultipartUpload` orquestrados pelo servidor, que são APIs nativas do SDK v3, e o alvo de produção é S3, então a mesma lib serve local e produção trocando só `endpoint`/`forcePathStyle`. A instabilidade do ecossistema MinIO (TD-05) reforça não acoplar o código a um SDK do fornecedor.
+**Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
+
+### phase-03-videos/TD-04
+
+**Recommendation:** é a única opção compatível ao mesmo tempo com o TD-02 (upload direto), com a regra de nome de serviço do `CLAUDE.md` e com a restrição de host assinado do SigV4. Chaves canônicas de env a fixar no schema Joi, `.env.example` e `compose.yaml`: `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `S3_FORCE_PATH_STYLE`. A criação do bucket e a configuração de CORS ficam a cargo do plano (bootstrap idempotente). Depende de TD-03 e TD-05.
+**Libraries:** —
+
+### phase-03-videos/TD-05
+
+**Recommendation:** é o único caminho que mantém o MinIO nomeado pelo projeto e continua recebendo correções de segurança. A limitação de tag se resolve fixando por digest (registrado no `library-refs.md`), e a falta de `mc` se resolve com bootstrap do bucket e CORS via SDK (TD-03/TD-04), o que ainda deixa o setup portável para S3 de produção. Se a política do tier gratuito da Chainguard mudar, a Option C (SeaweedFS) é o fallback por ter versionamento estável.
+**Libraries:** —
+
+### phase-03-videos/TD-06
+
+**Recommendation:** entrega o isolamento de processo que o diagrama e o requisito "sem travar o sistema" pedem, sem pagar o custo de duplicar entidades e configs nem de introduzir tooling de monorepo. O custo (ffmpeg na imagem da API) é aceitável em dev e habilita os testes de integração do worker no mesmo container de testes (TD-12). Depende de TD-01 e TD-07.
+**Libraries:** —
+
+### phase-03-videos/TD-07
+
+**Recommendation:** remove a dependência abandonada (fluent-ffmpeg) e o custo de 10GB de disco por job, e o ffprobe/ffmpeg com input HTTP já faz seek por range. Políticas: frame da thumbnail em ~10% da duração (0s se a duração for desconhecida ou curta), escala para largura máxima de 1280px, saída JPEG. Metadados persistidos: duração, largura, altura, codecs de vídeo/áudio, bitrate e formato do container (subconjunto do JSON do ffprobe em coluna `jsonb`). Depende de TD-04 (endpoint interno) e TD-06.
+**Libraries:** —
+
+### phase-03-videos/TD-08
+
+**Recommendation:** é a leitura fiel do `project-plan.md` ("rascunho" é um estado editorial que atravessa as fases 03 e 04), e evita que a Fase 04 precise redefinir um enum já persistido. O ciclo exigido pela fase fica visível no banco como `draft` + `uploading → processing → ready | failed`. Política de falha e consistência: conclusão do upload em transação (`CompleteMultipartUpload` → `HeadObject` confere o tamanho → `processing_status=processing`; commit); enqueue após o commit com `jobId = videoId` (dedup), e o endpoint de conclusão é idempotente, reenfileirando quando o vídeo já está `processing`; `attempts: 3` com backoff exponencial; ao esgotar tentativas, `failed` + `processing_error`; arquivo que o ffprobe rejeita vai direto para `failed`, sem retry; processamento idempotente por chaves determinísticas (TD-04), com reprocessamento sobrescrevendo metadados e thumbnail. Depende de TD-01 e TD-02.
+**Libraries:** —
+
+### phase-03-videos/TD-09
+
+**Recommendation:** dá URLs curtas e sem conflito por construção (constraint no banco), reutiliza o padrão de retry em unique violation já estabelecido em `ChannelsService` (`phase-02-auth/TD-10`) e não adiciona dependência. A PK continua uuid, e o `public_id` é o identificador de todas as rotas públicas de vídeo.
+**Libraries:** —
+
+### phase-03-videos/TD-10
+
+**Recommendation:** atende "sem download completo" via `Range`/`206` nativo do storage, mantém os bytes fora da API (coerente com o TD-02 e com o diagrama) e resolve streaming e download com o mesmo mecanismo, só variando o `ResponseContentDisposition`. HLS fica como evolução futura, fora do escopo desta fase. Expiração das URLs de entrega: 1h, configurável. Depende de TD-03 e TD-04.
+**Libraries:** —
+
+### phase-03-videos/TD-11
+
+**Recommendation:** segue o princípio de acesso anônimo do `project-plan.md`, funciona com o player nativo sem mudar o transporte de token herdado da Fase 02, e mantém a fase dentro do seu escopo. A regra de visibilidade editorial é uma capacidade da Fase 04 e deve ser registrada como restrição herdada para ela. Depende de TD-08, TD-09 e TD-10.
+**Libraries:** —
+
+### phase-03-videos/TD-12
+
+**Recommendation:** cumpre a política de não mockar o que dá para testar com a infra do Compose, mantendo a hermeticidade e o determinismo que a alternativa de depender do container perde. A topologia de dois processos é verificada por healthcheck do serviço `video-worker` no Compose, sem colocar a suíte automatizada na dependência dele. Depende de TD-04, TD-06 e TD-07.
+**Libraries:** —
 
 ## Inherited Decisions Detail
 

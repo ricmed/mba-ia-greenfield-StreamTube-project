@@ -1,7 +1,7 @@
 ---
 scope_type: phase
 related_phases: [3]
-status: pending
+status: decided
 date: 2026-09-22
 scope_description: "Backend foundation for video upload and processing: object storage (S3-compatible, MinIO locally), background job queue, FFmpeg video worker, direct-to-storage upload of files up to 10GB, draft pre-registration, automatic metadata extraction and thumbnail generation, unique video URL, streaming via HTTP range requests and user download."
 ---
@@ -44,7 +44,8 @@ _Decisões herdadas (não reabertas):_ config via `@nestjs/config` + Joi + names
 
 **Recommendation:** **Option A (BullMQ + Redis)** — é o único caminho com integração oficial do NestJS 11 que entrega retries/backoff, estado por job e deduplicação por `jobId` sem código de infraestrutura próprio, e materializa o container `Message Queue` previsto no diagrama. O dual write é tratado por enqueue pós-commit com `jobId = videoId` e reenfileiramento idempotente (TD-08). Imagem sugerida: `redis:8-alpine` com `--maxmemory-policy noeviction --appendonly yes` (Valkey 8 é drop-in se a licença do Redis 8 for um problema).
 
-**Decision:** _[pending]_
+**Decision:** A (BullMQ + Redis via `@nestjs/bullmq`)
+**Libraries:** @nestjs/bullmq, bullmq
 
 ---
 
@@ -87,7 +88,7 @@ _Decisões herdadas (não reabertas):_ config via `@nestjs/config` + Joi + names
 
 Depende de TD-03 e TD-04.
 
-**Decision:** _[pending]_
+**Decision:** C (Multipart presigned direto ao storage)
 
 ---
 
@@ -113,7 +114,8 @@ Depende de TD-03 e TD-04.
 
 **Recommendation:** **Option A (AWS SDK v3)** — o TD-02 exige presign de `UploadPart` e `CompleteMultipartUpload` orquestrados pelo servidor, que são APIs nativas do SDK v3, e o alvo de produção é S3, então a mesma lib serve local e produção trocando só `endpoint`/`forcePathStyle`. A instabilidade do ecossistema MinIO (TD-05) reforça não acoplar o código a um SDK do fornecedor.
 
-**Decision:** _[pending]_
+**Decision:** A (AWS SDK v3)
+**Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
 
 ---
 
@@ -147,7 +149,7 @@ Depende de TD-03 e TD-04.
 
 **Recommendation:** **Option A (bucket privado único + endpoints interno/público)** — é a única opção compatível ao mesmo tempo com o TD-02 (upload direto), com a regra de nome de serviço do `CLAUDE.md` e com a restrição de host assinado do SigV4. Chaves canônicas de env a fixar no schema Joi, `.env.example` e `compose.yaml`: `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `S3_FORCE_PATH_STYLE`. A criação do bucket e a configuração de CORS ficam a cargo do plano (bootstrap idempotente). Depende de TD-03 e TD-05.
 
-**Decision:** _[pending]_
+**Decision:** A (Bucket privado único + endpoints interno/público)
 
 ---
 
@@ -183,7 +185,7 @@ Depende de TD-03 e TD-04.
 
 **Recommendation:** **Option A (Chainguard MinIO)** — é o único caminho que mantém o MinIO nomeado pelo projeto e continua recebendo correções de segurança. A limitação de tag se resolve fixando por digest (registrado no `library-refs.md`), e a falta de `mc` se resolve com bootstrap do bucket e CORS via SDK (TD-03/TD-04), o que ainda deixa o setup portável para S3 de produção. Se a política do tier gratuito da Chainguard mudar, a Option C é o fallback por ter versionamento estável.
 
-**Decision:** _[pending]_
+**Decision:** A (Chainguard MinIO, fixado por digest)
 
 ---
 
@@ -214,7 +216,7 @@ Depende de TD-03 e TD-04.
 
 **Recommendation:** **Option A (mesmo codebase, entrypoint e container próprios)** — entrega o isolamento de processo que o diagrama e o requisito "sem travar o sistema" pedem, sem pagar o custo de duplicar entidades e configs nem de introduzir tooling de monorepo. O custo (ffmpeg na imagem da API) é aceitável em dev e habilita os testes de integração do worker no mesmo container de testes (TD-12). Depende de TD-01 e TD-07.
 
-**Decision:** _[pending]_
+**Decision:** A (Mesmo codebase, entrypoint e container próprios)
 
 ---
 
@@ -245,7 +247,7 @@ Depende de TD-03 e TD-04.
 
 **Recommendation:** **Option A (ffmpeg do sistema via `execFile`, com leitura por URL presigned interna)** — remove a dependência abandonada (B) e o custo de 10GB de disco por job (C), e o ffprobe/ffmpeg com input HTTP já faz seek por range. Políticas sugeridas: frame da thumbnail em ~10% da duração (0s se a duração for desconhecida ou curta), escala para largura máxima de 1280px, saída JPEG. Metadados persistidos: duração, largura, altura, codecs de vídeo/áudio, bitrate e formato do container (subconjunto do JSON do ffprobe em coluna `jsonb`). Depende de TD-04 (endpoint interno) e TD-06.
 
-**Decision:** _[pending]_
+**Decision:** A (ffmpeg do sistema via `execFile` + URL presigned interna)
 
 ---
 
@@ -286,7 +288,7 @@ Política de falha e consistência sugerida:
 
 Depende de TD-01 e TD-02.
 
-**Decision:** _[pending]_
+**Decision:** B (`status` editorial + `processing_status` técnico)
 
 ---
 
@@ -317,7 +319,7 @@ Depende de TD-01 e TD-02.
 
 **Recommendation:** **Option B (ID curto de 64 bits via `node:crypto` + `UNIQUE` + retry)** — dá URLs curtas e sem conflito por construção (constraint no banco), reutiliza o padrão de retry em unique violation já estabelecido em `ChannelsService` (`phase-02-auth/TD-10`) e não adiciona dependência. A PK continua uuid, e o `public_id` é o identificador de todas as rotas públicas de vídeo.
 
-**Decision:** _[pending]_
+**Decision:** B (ID curto 64 bits via `node:crypto` + UNIQUE + retry)
 
 ---
 
@@ -348,7 +350,7 @@ Depende de TD-01 e TD-02.
 
 **Recommendation:** **Option B (302 para presigned GET)** — atende "sem download completo" via `Range`/`206` nativo do storage, mantém os bytes fora da API (coerente com o TD-02 e com o diagrama) e resolve streaming e download com o mesmo mecanismo, só variando o `ResponseContentDisposition`. HLS fica como evolução futura, fora do escopo desta fase. Expiração sugerida das URLs de entrega: 1h, configurável. Depende de TD-03 e TD-04.
 
-**Decision:** _[pending]_
+**Decision:** B (302 para presigned GET; Range/206 nativo do storage)
 
 ---
 
@@ -374,7 +376,7 @@ Depende de TD-01 e TD-02.
 
 **Recommendation:** **Option A (público para vídeos `ready`, por ID não adivinhável)** — segue o princípio de acesso anônimo do `project-plan.md`, funciona com o player nativo sem mudar o transporte de token herdado da Fase 02, e mantém a fase dentro do seu escopo. A regra de visibilidade editorial é uma capacidade da Fase 04 e deve ser registrada como restrição herdada para ela. Depende de TD-08, TD-09 e TD-10.
 
-**Decision:** _[pending]_
+**Decision:** A (Público para vídeos `ready` via ID não adivinhável)
 
 ---
 
@@ -411,7 +413,7 @@ Depende de TD-01 e TD-02.
 
 **Recommendation:** **Option A (infra real + worker no processo do teste)** — cumpre a política de não mockar o que dá para testar com a infra do Compose, mantendo a hermeticidade e o determinismo que a Option B perde. A topologia de dois processos é verificada manualmente/por healthcheck do serviço `video-worker` no Compose, sem colocar a suíte automatizada na dependência dele. Depende de TD-04, TD-06 e TD-07.
 
-**Decision:** _[pending]_
+**Decision:** A (Infra real + worker no processo do teste)
 
 ---
 
@@ -419,15 +421,15 @@ Depende de TD-01 e TD-02.
 
 | ID | Scope | Decision | Recommendation | Choice |
 |----|-------|----------|---------------|--------|
-| TD-01 | Backend | Tecnologia da fila de processamento | A (BullMQ + Redis via `@nestjs/bullmq`) | _[pending]_ |
-| TD-02 | Cross-layer | Estratégia de upload de até 10GB | C (Multipart presigned direto ao storage) | _[pending]_ |
-| TD-03 | Backend | Biblioteca cliente de object storage | A (AWS SDK v3) | _[pending]_ |
-| TD-04 | Cross-layer | Organização do storage e assinatura de URLs | A (Bucket privado único + endpoints interno/público) | _[pending]_ |
-| TD-05 | Repo-wide | Imagem do storage S3-compatível no Compose | A (Chainguard MinIO, fixado por digest) | _[pending]_ |
-| TD-06 | Repo-wide | Topologia e runtime do worker | A (Mesmo codebase, entrypoint e container próprios) | _[pending]_ |
-| TD-07 | Backend | Invocação do FFmpeg e leitura do original | A (ffmpeg do sistema via `execFile` + URL presigned interna) | _[pending]_ |
-| TD-08 | Backend | Ciclo de status, falhas e consistência fila ↔ banco | B (`status` editorial + `processing_status` técnico) | _[pending]_ |
-| TD-09 | Cross-layer | Identificador da URL única | B (ID curto 64 bits via `node:crypto` + UNIQUE + retry) | _[pending]_ |
-| TD-10 | Cross-layer | Entrega: streaming e download | B (302 para presigned GET; Range/206 nativo do storage) | _[pending]_ |
-| TD-11 | Cross-layer | Acesso a stream/download nesta fase | A (Público para vídeos `ready` via ID não adivinhável) | _[pending]_ |
-| TD-12 | Backend | Estratégia de testes para storage, fila e worker | A (Infra real + worker no processo do teste) | _[pending]_ |
+| TD-01 | Backend | Tecnologia da fila de processamento | A (BullMQ + Redis via `@nestjs/bullmq`) | **A** |
+| TD-02 | Cross-layer | Estratégia de upload de até 10GB | C (Multipart presigned direto ao storage) | **C** |
+| TD-03 | Backend | Biblioteca cliente de object storage | A (AWS SDK v3) | **A** |
+| TD-04 | Cross-layer | Organização do storage e assinatura de URLs | A (Bucket privado único + endpoints interno/público) | **A** |
+| TD-05 | Repo-wide | Imagem do storage S3-compatível no Compose | A (Chainguard MinIO, fixado por digest) | **A** |
+| TD-06 | Repo-wide | Topologia e runtime do worker | A (Mesmo codebase, entrypoint e container próprios) | **A** |
+| TD-07 | Backend | Invocação do FFmpeg e leitura do original | A (ffmpeg do sistema via `execFile` + URL presigned interna) | **A** |
+| TD-08 | Backend | Ciclo de status, falhas e consistência fila ↔ banco | B (`status` editorial + `processing_status` técnico) | **B** |
+| TD-09 | Cross-layer | Identificador da URL única | B (ID curto 64 bits via `node:crypto` + UNIQUE + retry) | **B** |
+| TD-10 | Cross-layer | Entrega: streaming e download | B (302 para presigned GET; Range/206 nativo do storage) | **B** |
+| TD-11 | Cross-layer | Acesso a stream/download nesta fase | A (Público para vídeos `ready` via ID não adivinhável) | **A** |
+| TD-12 | Backend | Estratégia de testes para storage, fila e worker | A (Infra real + worker no processo do teste) | **A** |
