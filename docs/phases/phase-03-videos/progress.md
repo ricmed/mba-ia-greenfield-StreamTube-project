@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 1/14 completed
+**SIs:** 2/14 completed
 
 ### SI-03.1 — Infraestrutura: dependências, configuração e serviços no Compose
 - **Status:** completed
@@ -13,9 +13,12 @@
   - Limites do schema Joi ancorados nos limites reais do S3: parte entre 5 MiB e 5 GiB, expiração de URL até 604800s (7 dias).
 
 ### SI-03.2 — StorageModule: cliente S3 e operações de object storage
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 7/7 passing (storage.service.integration-spec.ts, storage.module.spec.ts)
+- **Observations:**
+  - Criado `src/test/signed-url.ts`: o teste conecta no endpoint interno enviando o header `Host` do endpoint público, mantendo a assinatura SigV4 válida. Sem isso, URLs assinadas para o cliente seriam inalcançáveis de dentro do container, e a alternativa seria mockar o presign — justamente o que TD-12 proíbe.
+  - `PutBucketCors` é tolerado com warn: o MinIO responde NotImplemented e usa o CORS de servidor (`MINIO_API_CORS_ALLOW_ORIGIN` no compose); em S3 real a regra é aplicada de fato.
+  - Teste de multipart usa partes de 5 MiB porque é o mínimo que o S3 aceita para partes não finais.
 
 ### SI-03.3 — Entidade Video e migration CreateVideos
 - **Status:** pending
