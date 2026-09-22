@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 4/14 completed
+**SIs:** 5/14 completed
 
 ### SI-03.1 — Infraestrutura: dependências, configuração e serviços no Compose
 - **Status:** completed
@@ -38,9 +38,13 @@
   - As 7 exceções novas foram acrescentadas ao `domain.exception.ts` existente, seguindo o formato herdado (`errorCode`, status, mensagem).
 
 ### SI-03.5 — POST /videos: pré-cadastro do rascunho e início do multipart
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 13/13 passing (videos.service.spec.ts 5, videos.service.integration-spec.ts 2, videos.e2e-spec.ts 6)
+- **Observations:**
+  - `ChannelsService.findByUserId` foi adicionado ao módulo de canais, e não um acesso direto ao repositório de Channel pelo VideosService — respeita a regra de responsabilidade única do CLAUDE.md.
+  - O `id` (uuid) é gerado na aplicação antes do insert, porque a `storage_key` é determinística (`videos/{id}/original`) e precisa existir antes do `CreateMultipartUpload`.
+  - Compensação: se a persistência falhar depois do multipart aberto, o upload é abortado no storage, senão ficariam partes órfãs. Coberto por teste unitário.
+  - Limites de tamanho/MIME ficam no service (413/415 do Error Catalog), não no DTO — no DTO virariam 400 e quebrariam o contrato da API.
 
 ### SI-03.6 — POST /videos/:publicId/upload/parts: assinatura de partes sob demanda
 - **Status:** pending
