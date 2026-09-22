@@ -1,3 +1,4 @@
+import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigType } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -30,6 +31,24 @@ import { VideosModule } from './videos/videos.module';
       ],
       validationSchema: envValidationSchema,
       validationOptions: { allowUnknown: true, abortEarly: false },
+    }),
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [queueConfig.KEY],
+      useFactory: (queue: ConfigType<typeof queueConfig>) => ({
+        connection: {
+          host: queue.host,
+          port: queue.port,
+          // Workers must retry Redis commands indefinitely instead of dying on
+          // a transient outage (library-refs.md → bullmq).
+          maxRetriesPerRequest: null,
+        },
+        defaultJobOptions: {
+          attempts: queue.attempts,
+          backoff: { type: 'exponential', delay: queue.backoffDelayMs },
+          removeOnComplete: true,
+        },
+      }),
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],

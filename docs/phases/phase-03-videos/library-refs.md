@@ -1,9 +1,13 @@
 ---
 libs:
   "@nestjs/bullmq":
-    version: "^12.0.0"
+    version: "^11.0.5"
     context7_id: "/nestjs/bull"
     fetched_at: "2026-09-22T15:10:00-03:00"
+  "ioredis":
+    version: "^5.11.1"
+    context7_id: "/websites/bullmq_io"
+    fetched_at: "2026-09-22T16:05:00-03:00"
   "bullmq":
     version: "^6.3.8"
     context7_id: "/websites/bullmq_io"
@@ -22,7 +26,12 @@ sources_mtime:
 
 # phase-03-videos — Library References
 
-_Compatibilidade verificada em 2026-09-22 dentro do container (`npm view`)._ `@nestjs/bullmq@12.0.0` declara peers `@nestjs/core`/`@nestjs/common` `^10 || ^11 || ^12` (o projeto tem 11.1.16) e `bullmq ^3 || ^4 || ^5 || ^6` (última: 6.3.8). Os pacotes do AWS SDK v3 seguem versionamento conjunto (3.1137.0).
+_Compatibilidade verificada em 2026-09-22 dentro do container (`npm view`), com duas correções aplicadas durante o SI-03.7:_
+
+- **`@nestjs/bullmq` fixado em `^11.0.5`, não `^12`.** A v12 declara `"type": "module"` (ESM puro) e o runtime CommonJS do Jest não consegue carregá-la (`SyntaxError: Unexpected token 'export'`). A 11.0.5 é CommonJS e mantém os mesmos peers relevantes: `@nestjs/core`/`@nestjs/common` `^10 || ^11` (o projeto tem 11.1.16) e `bullmq ^3 || ^4 || ^5 || ^6`.
+- **`ioredis` precisa ser dependência explícita.** O `bullmq@6` transformou `ioredis` em peer **opcional** (era dependência direta na v5); sem instalá-lo, qualquer `Queue` falha no boot com "BullMQ could not load the optional 'ioredis' package" — em produção, não só nos testes.
+
+Os pacotes do AWS SDK v3 seguem versionamento conjunto (3.1137.0).
 
 ## @nestjs/bullmq
 

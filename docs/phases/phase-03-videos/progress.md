@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 6/14 completed
+**SIs:** 7/14 completed
 
 ### SI-03.1 — Infraestrutura: dependências, configuração e serviços no Compose
 - **Status:** completed
@@ -56,9 +56,13 @@
   - O e2e envia bytes de verdade para a URL assinada e confere o `ETag` devolvido — é o que prova que a URL é utilizável pelo cliente.
 
 ### SI-03.7 — Fila de processamento: BullMQ, Redis e producer
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 4/4 passing (video-processing.producer.integration-spec.ts 3, videos.module.spec.ts 1)
+- **Observations:**
+  - **Duas correções de dependência, ambas descobertas por teste vermelho.** (1) `@nestjs/bullmq@12` é ESM puro e o runtime CommonJS do Jest não a carrega; fixado em `^11.0.5` (CJS, mesmos peers). (2) `bullmq@6` tornou `ioredis` peer **opcional**, então ele virou dependência explícita — sem isso a fila nem inicializa, em produção também. `library-refs.md` foi atualizado com as duas.
+  - Corrigido de passagem um erro de `tsc` que eu havia introduzido no SI-03.2: `ConfigType` precisa de `import type` com `isolatedModules` + `emitDecoratorMetadata`. `npx tsc --noEmit` agora sai com 0.
+  - O teste do producer limpa a fila com `obliterate` entre casos; a fila é compartilhada com o dev, e não isolada por prefixo. Aceitável porque em dev o worker consome os jobs, mas fica anotado.
+  - Follow-up fora de escopo: `videos.module.spec.ts` leva ~51s e abre conexões reais, o que pelo contrato de sufixos seria `.integration-spec.ts`. Mantido como `.spec.ts` por ser o padrão já estabelecido pelos módulos da fase 02 (auth, channels, users).
 
 ### SI-03.8 — Conclusão e cancelamento do upload
 - **Status:** pending
