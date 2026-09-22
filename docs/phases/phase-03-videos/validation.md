@@ -2,7 +2,7 @@
 kind: phase
 name: phase-03-videos
 status: dirty
-issue_count: 1
+issue_count: 0
 sources_mtime:
   docs/phases/phase-03-videos/context.md: "2026-09-22T15:06:49-03:00"
   docs/decisions/technical-decisions-phase-03-videos.md: "2026-09-22T15:02:57-03:00"
@@ -64,8 +64,9 @@ issues:
     summary: "TD-12 pending — estratégia de testes para storage, fila e worker"
     resolved_by: phase-03-videos/TD-12
   - id: ICC-1
-    status: open
+    status: resolved
     summary: "TD-10/TD-11 expõem endpoints chamados pelo browser vs BFF estrito herdado da fase 02"
+    resolved_by: phase-03-videos/TD-10
 advisories: []
 ---
 
@@ -91,11 +92,7 @@ _None._
 
 ### Inherited Constraint Conflicts
 
-- **ICC-1** — Os TDs de entrega desta fase, agora decididos, colidem com uma convenção herdada da Fase 02. De um lado, `phase-03-videos/TD-10` (**B — `302` para presigned GET**) e `phase-03-videos/TD-11` (**A — stream e download públicos para vídeos `ready`**) desenham endpoints da API NestJS feitos para o browser chamar diretamente: a tag `<video>` aponta para o endpoint de stream, recebe o `302` e segue para o storage. Do outro lado, os herdados `phase-02-auth-frontend/TD-01` ("o Route Handler do Next.js é o **único** chamador da API NestJS") e `phase-02-auth-frontend/TD-05` ("a API é chamada server-to-server pelo Next.js, **nunca diretamente do browser**", declarado explicitamente como precedente para as **Fases 03–07**).
-
-  Nota: a exceção registrada em OQ-2/OQ-10 cobria apenas os **bytes** trafegando direto entre browser e storage, com as chamadas de controle permanecendo na API. O ponto aberto aqui é diferente e mais estreito: **quem chama o endpoint de entrega da API** — o browser ou o BFF. Isso define a forma do contrato desta fase, e não pode ficar implícito.
-
-  Explicit choice: (a) **manter TD-10/TD-11 e registrar a exceção à convenção herdada**, admitindo que endpoints públicos de mídia (stream/download) são chamados direto pelo browser, com o BFF estrito seguindo válido para tudo que é autenticado — a exceção fica anotada como restrição herdada para as fases 04–07; (b) **mudar a forma do contrato de entrega** para que o BFF resolva a URL: o endpoint da API devolve JSON com a URL presigned em vez de `302`, o Route Handler do Next.js a repassa ao player, e só o storage é acessado direto pelo browser — preserva a convenção herdada ao custo de um passo a mais e de mudar TD-10; (c) **abrir uma revisão da convenção herdada** via `/decide`, ajustando `phase-02-auth-frontend/TD-01`/`TD-05` para declararem que a regra vale para chamadas autenticadas, e não para entrega pública de mídia.
+_None._
 
 ### Unresolved Open Questions
 
@@ -121,3 +118,4 @@ _None._
 - **OQ-10** _(resolved_by phase-03-videos/TD-10)_ — Entrega: **B (`302` para presigned GET, com `Range`/`206` nativo do storage)**.
 - **OQ-11** _(resolved_by phase-03-videos/TD-11)_ — Acesso: **A (público para vídeos `ready`, via ID não adivinhável)**. A restrição de visibilidade editorial fica registrada como trabalho da Fase 04.
 - **OQ-12** _(resolved_by phase-03-videos/TD-12)_ — Testes: **A (infra real do Compose + worker instanciado no processo do teste)**.
+- **ICC-1** _(resolved_by phase-03-videos/TD-10)_ — Mantidos TD-10 (`302`) e TD-11 (acesso público) com **exceção explícita registrada** à convenção de BFF estrito herdada (`phase-02-auth-frontend/TD-01` e `TD-05`): endpoints públicos de mídia são chamados direto pelo browser; o BFF estrito segue valendo para toda chamada autenticada. A exceção foi gravada como bloco `**Revisions:**` em TD-10 e TD-11, e as fases 04–07 a herdam junto com a regra de visibilidade editorial.

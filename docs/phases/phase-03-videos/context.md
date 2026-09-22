@@ -3,7 +3,7 @@ kind: phase
 name: phase-03-videos
 sources_mtime:
   docs/project-plan.md: "2026-09-18T17:16:04-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-09-22T15:02:57-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-09-22T15:20:15-03:00"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-09-18T17:24:37-03:00"
   docs/phases/phase-01-configuracao-base/context.md: "2026-09-18T17:24:37-03:00"
   docs/phases/phase-02-auth/context.md: "2026-09-18T17:24:37-03:00"
@@ -58,7 +58,9 @@ sources_mtime:
 | phase-03-videos/TD-08 | phase | Backend | Ciclo de status do vídeo, falhas e consistência fila ↔ banco | decided | B (`status` editorial + `processing_status` técnico) | — |
 | phase-03-videos/TD-09 | phase | Cross-layer | Identificador da URL única do vídeo | decided | B (ID curto 64 bits via `node:crypto` + UNIQUE + retry) | — |
 | phase-03-videos/TD-10 | phase | Cross-layer | Entrega do vídeo — streaming e download | decided | B (302 para presigned GET; Range/206 nativo do storage) | — |
+|     └─ Last revision: 2026-09-22 — Registrada exceção explícita à convenção de BFF estrito herdada… | | | | | | |
 | phase-03-videos/TD-11 | phase | Cross-layer | Acesso a streaming e download nesta fase | decided | A (Público para vídeos `ready` via ID não adivinhável) | — |
+|     └─ Last revision: 2026-09-22 — Registrada exceção explícita à convenção de BFF estrito herdada… | | | | | | |
 | phase-03-videos/TD-12 | phase | Backend | Estratégia de testes para storage, fila e worker | decided | A (Infra real + worker no processo do teste) | — |
 
 _`Renders in` column omitted: no TD in the kept set sets the field explicitly._
@@ -120,7 +122,8 @@ _Source files:_
 
 ### phase-03-videos/TD-08
 
-**Recommendation:** é a leitura fiel do `project-plan.md` ("rascunho" é um estado editorial que atravessa as fases 03 e 04), e evita que a Fase 04 precise redefinir um enum já persistido. O ciclo exigido pela fase fica visível no banco como `draft` + `uploading → processing → ready | failed`. Política de falha e consistência: conclusão do upload em transação (`CompleteMultipartUpload` → `HeadObject` confere o tamanho → `processing_status=processing`; commit); enqueue após o commit com `jobId = videoId` (dedup), e o endpoint de conclusão é idempotente, reenfileirando quando o vídeo já está `processing`; `attempts: 3` com backoff exponencial; ao esgotar tentativas, `failed` + `processing_error`; arquivo que o ffprobe rejeita vai direto para `failed`, sem retry; processamento idempotente por chaves determinísticas (TD-04), com reprocessamento sobrescrevendo metadados e thumbnail. Depende de TD-01 e TD-02.
+**Recommendation:** é a leitura fiel do `project-plan.md` ("rascunho" é um estado editorial que atravessa as fases 03 e 04), e evita que a Fase 04 precise redefinir um enum já persistido. O ciclo exigido pela fase fica visível no banco como `draft` + `uploading → processing → ready | failed`.
+Política de falha e consistência: conclusão do upload em transação (`CompleteMultipartUpload` → `HeadObject` confere o tamanho → `processing_status=processing`; commit); enqueue após o commit com `jobId = videoId` (dedup), e o endpoint de conclusão é idempotente, reenfileirando quando o vídeo já está `processing`; `attempts: 3` com backoff exponencial; ao esgotar tentativas, `failed` + `processing_error`; arquivo que o ffprobe rejeita vai direto para `failed`, sem retry; processamento idempotente por chaves determinísticas (TD-04), com reprocessamento sobrescrevendo metadados e thumbnail. Depende de TD-01 e TD-02.
 **Libraries:** —
 
 ### phase-03-videos/TD-09
@@ -133,10 +136,16 @@ _Source files:_
 **Recommendation:** atende "sem download completo" via `Range`/`206` nativo do storage, mantém os bytes fora da API (coerente com o TD-02 e com o diagrama) e resolve streaming e download com o mesmo mecanismo, só variando o `ResponseContentDisposition`. HLS fica como evolução futura, fora do escopo desta fase. Expiração das URLs de entrega: 1h, configurável. Depende de TD-03 e TD-04.
 **Libraries:** —
 
+**Revisions:**
+- 2026-09-22 — Registrada exceção explícita à convenção de BFF estrito herdada (`phase-02-auth-frontend/TD-01` e `TD-05`, declaradas como precedente para as fases 03–07): os endpoints de entrega desta fase respondem `302` diretamente ao browser (tag `<video>` e link de download), em vez de serem chamados apenas server-to-server pelo Route Handler do Next.js. Rationale: exceção restrita a mídia pública — o BFF estrito continua valendo para toda chamada autenticada; a entrega de mídia por ID não adivinhável é anônima por decisão de `TD-11`.
+
 ### phase-03-videos/TD-11
 
 **Recommendation:** segue o princípio de acesso anônimo do `project-plan.md`, funciona com o player nativo sem mudar o transporte de token herdado da Fase 02, e mantém a fase dentro do seu escopo. A regra de visibilidade editorial é uma capacidade da Fase 04 e deve ser registrada como restrição herdada para ela. Depende de TD-08, TD-09 e TD-10.
 **Libraries:** —
+
+**Revisions:**
+- 2026-09-22 — Registrada exceção explícita à convenção de BFF estrito herdada (`phase-02-auth-frontend/TD-01` e `TD-05`): o acesso anônimo a stream e download implica que o browser chama o endpoint da API diretamente, sem passar pelo Route Handler. Rationale: exceção restrita a mídia pública — o BFF estrito continua valendo para toda chamada autenticada; as fases 04–07 herdam esta exceção junto com a regra de visibilidade editorial.
 
 ### phase-03-videos/TD-12
 

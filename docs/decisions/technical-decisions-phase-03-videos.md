@@ -351,6 +351,8 @@ Depende de TD-01 e TD-02.
 **Recommendation:** **Option B (302 para presigned GET)** — atende "sem download completo" via `Range`/`206` nativo do storage, mantém os bytes fora da API (coerente com o TD-02 e com o diagrama) e resolve streaming e download com o mesmo mecanismo, só variando o `ResponseContentDisposition`. HLS fica como evolução futura, fora do escopo desta fase. Expiração sugerida das URLs de entrega: 1h, configurável. Depende de TD-03 e TD-04.
 
 **Decision:** B (302 para presigned GET; Range/206 nativo do storage)
+**Revisions:**
+- 2026-09-22 — Registrada exceção explícita à convenção de BFF estrito herdada (`phase-02-auth-frontend/TD-01` e `TD-05`, declaradas como precedente para as fases 03–07): os endpoints de entrega desta fase respondem `302` diretamente ao browser (tag `<video>` e link de download), em vez de serem chamados apenas server-to-server pelo Route Handler do Next.js. Rationale: exceção restrita a mídia pública — o BFF estrito continua valendo para toda chamada autenticada; a entrega de mídia por ID não adivinhável é anônima por decisão de `TD-11`.
 
 ---
 
@@ -377,6 +379,8 @@ Depende de TD-01 e TD-02.
 **Recommendation:** **Option A (público para vídeos `ready`, por ID não adivinhável)** — segue o princípio de acesso anônimo do `project-plan.md`, funciona com o player nativo sem mudar o transporte de token herdado da Fase 02, e mantém a fase dentro do seu escopo. A regra de visibilidade editorial é uma capacidade da Fase 04 e deve ser registrada como restrição herdada para ela. Depende de TD-08, TD-09 e TD-10.
 
 **Decision:** A (Público para vídeos `ready` via ID não adivinhável)
+**Revisions:**
+- 2026-09-22 — Registrada exceção explícita à convenção de BFF estrito herdada (`phase-02-auth-frontend/TD-01` e `TD-05`): o acesso anônimo a stream e download implica que o browser chama o endpoint da API diretamente, sem passar pelo Route Handler. Rationale: exceção restrita a mídia pública — o BFF estrito continua valendo para toda chamada autenticada; as fases 04–07 herdam esta exceção junto com a regra de visibilidade editorial.
 
 ---
 
