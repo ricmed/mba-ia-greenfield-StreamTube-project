@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 2/14 completed
+**SIs:** 3/14 completed
 
 ### SI-03.1 — Infraestrutura: dependências, configuração e serviços no Compose
 - **Status:** completed
@@ -21,9 +21,13 @@
   - Teste de multipart usa partes de 5 MiB porque é o mínimo que o S3 aceita para partes não finais.
 
 ### SI-03.3 — Entidade Video e migration CreateVideos
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 7/7 passing (video.entity.integration-spec.ts, migrations.integration-spec.ts)
+- **Observations:**
+  - `size_bytes` é `bigint` no banco e o driver `pg` devolve string; a entidade tipa `string | null` para refletir isso, em vez de mentir com `number`.
+  - O `down()` gerado já derruba os dois enums, e o spec de migrations passou a asseverar isso explicitamente — é a regressão que quebrou o baseline antes.
+  - `cleanAllTables` (helper compartilhado) passou a apagar `videos` antes de `channels`, senão a FK bloqueia a limpeza nas demais suítes.
+  - O teste de revert agora cobre a última migration (CreateVideos), não mais as de token, porque a ordem mudou.
 
 ### SI-03.4 — VideosModule, exceções de domínio e geração do public_id
 - **Status:** pending
