@@ -36,6 +36,7 @@ import { VideosModule } from './videos/videos.module';
       imports: [ConfigModule],
       inject: [queueConfig.KEY],
       useFactory: (queue: ConfigType<typeof queueConfig>) => ({
+        prefix: queue.prefix,
         connection: {
           host: queue.host,
           port: queue.port,

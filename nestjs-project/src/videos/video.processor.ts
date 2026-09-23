@@ -83,16 +83,21 @@ export class VideoProcessor extends WorkerHost {
   }
 
   /**
-   * Last-attempt failures land here (transient errors already consumed their
-   * retries), as well as the unrecoverable ones re-thrown above.
+   * Records transient failures that ran out of retries.
+   *
+   * Unrecoverable ones are skipped on purpose: `process()` already wrote the
+   * reason before giving up, or — when the draft was deleted mid-flight —
+   * there is no row left to write it on. Updating again here would repeat the
+   * write and, because this handler is not awaited by the job, it would run
+   * after whoever awaited that job already moved on.
    */
   @OnWorkerEvent('failed')
   async onFailed(job: Job<VideoProcessJobData>, err: Error): Promise<void> {
-    const attempts = job.opts.attempts ?? 1;
-    const isLastAttempt =
-      err instanceof UnrecoverableError || job.attemptsMade >= attempts;
+    if (err instanceof UnrecoverableError) return;
 
-    if (!isLastAttempt) {
+    const attempts = job.opts.attempts ?? 1;
+
+    if (job.attemptsMade < attempts) {
       this.logger.warn(
         `Processing of ${job.data.videoId} failed (attempt ${job.attemptsMade}/${attempts}); will retry: ${err.message}`,
       );

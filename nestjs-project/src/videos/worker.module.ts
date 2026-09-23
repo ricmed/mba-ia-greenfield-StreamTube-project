@@ -51,6 +51,7 @@ import { VideoProcessor } from './video.processor';
       imports: [ConfigModule],
       inject: [queueConfig.KEY],
       useFactory: (queue: ConfigType<typeof queueConfig>) => ({
+        prefix: queue.prefix,
         connection: {
           host: queue.host,
           port: queue.port,

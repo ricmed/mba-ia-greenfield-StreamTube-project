@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 12/14 completed
+**SIs:** 13/14 completed
 
 ### SI-03.1 — Infraestrutura: dependências, configuração e serviços no Compose
 - **Status:** completed
@@ -109,9 +109,13 @@
   - Validação extra do spec exportado: todos os `$ref` resolvem e toda resposta tem `description` — os dois erros que quebram a UI do Swagger.
 
 ### SI-03.13 — E2E do fluxo completo: upload, processamento e entrega
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 339/339 passing na rodada (unit+integração 256; e2e 83)
+- **Observations:**
+  - **Isolamento da fila era pré-requisito, não detalhe:** o container `video-worker` consome o mesmo Redis e roubaria os jobs do teste, deixando a espera pendurada para sempre. Adicionado `prefix` ao `queue.config` (env `QUEUE_PREFIX`), com o e2e sob `bull-e2e` — o isolamento que o TD-12 previa. O `process.env` é atribuído no topo do arquivo de teste porque as factories do `registerAs` leem o ambiente na inicialização do container Nest.
+  - Espera determinística via `job.waitUntilFinished(queueEvents)`, sem polling nem tempo fixo, conforme o critério de aceite.
+  - **Defeito de produção encontrado pelo teardown do teste:** em arquivo inválido, `markFailed` rodava duas vezes — no `process()` e de novo no `@OnWorkerEvent('failed')`, já que `UnrecoverableError` contava como última tentativa. A segunda escrita fica num handler que ninguém aguarda e chegava depois do `afterAll` fechar a conexão (`QueryFailedError: Connection terminated`). O `onFailed` passou a ignorar `UnrecoverableError`: quem registra é o `process()`, e no caso do rascunho apagado não existe linha para registrar. Teste novo no `video.processor.integration-spec.ts` fixa o comportamento.
+  - O download compara os bytes recebidos com os enviados, e a thumbnail é buscada de fato no storage (`image/jpeg`), em vez de só checar a presença da chave.
 
 ### SI-03.14 — Documentação de IA e diagrama de arquitetura
 - **Status:** pending

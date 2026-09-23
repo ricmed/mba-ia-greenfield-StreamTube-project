@@ -186,6 +186,27 @@ describe('VideoProcessor (integration)', () => {
     ).rejects.toBeInstanceOf(UnrecoverableError);
   });
 
+  it('should leave an unrecoverable failure to process(), not rewrite it', async () => {
+    const video = await seedProcessingVideo(createCorruptFixture());
+
+    await expect(processor.process(jobFor(video.id))).rejects.toBeInstanceOf(
+      UnrecoverableError,
+    );
+    const recorded = await videoRepository.findOneByOrFail({ id: video.id });
+
+    // The worker fires `failed` after process() threw. Writing again from an
+    // event handler nobody awaits means the update can land after the caller
+    // (a test, a shutting-down worker) has already closed its connection.
+    await processor.onFailed(
+      jobFor(video.id),
+      new UnrecoverableError('already recorded'),
+    );
+
+    const after = await videoRepository.findOneByOrFail({ id: video.id });
+    expect(after.processing_error).toBe(recorded.processing_error);
+    expect(after.processing_status).toBe(VideoProcessingStatus.FAILED);
+  });
+
   it('should persist the failure only on the last attempt', async () => {
     const video = await seedProcessingVideo(await createVideoFixture());
     const job = {

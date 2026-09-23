@@ -1,6 +1,8 @@
+import { getQueueToken } from '@nestjs/bullmq';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { Test, TestingModule } from '@nestjs/testing';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
+import { Queue, QueueEvents } from 'bullmq';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
@@ -10,6 +12,19 @@ import { ValidationExceptionFilter } from '../src/common/filters/validation-exce
 import { StorageService } from '../src/storage/storage.service';
 import { cleanAllTables } from '../src/test/create-test-data-source';
 import { fetchSignedUrl } from '../src/test/signed-url';
+import {
+  createCorruptFixture,
+  createVideoFixture,
+} from '../src/test/video-fixture';
+import { VIDEO_PROCESSING } from '../src/videos/video-processing.constants';
+import { WorkerModule } from '../src/videos/worker.module';
+
+// Assigned before any Nest container is built, because the config factories
+// read process.env when the module initialises. The suite runs the queue under
+// its own Redis prefix so the `video-worker` container of the Compose stack,
+// which shares this Redis, cannot consume the jobs enqueued here
+// (phase-03-videos/TD-12).
+process.env.QUEUE_PREFIX = 'bull-e2e';
 
 const VALID_BODY = {
   title: 'My first video',
@@ -23,6 +38,9 @@ describe('Videos (e2e)', () => {
   let dataSource: DataSource;
   let throttlerStorage: ThrottlerStorageService;
   let storageService: StorageService;
+  let workerModule: TestingModule;
+  let queue: Queue;
+  let queueEvents: QueueEvents;
   let counter = 0;
 
   beforeAll(async () => {
@@ -48,9 +66,28 @@ describe('Videos (e2e)', () => {
     throttlerStorage =
       moduleFixture.get<ThrottlerStorageService>(ThrottlerStorage);
     storageService = moduleFixture.get(StorageService);
+    queue = moduleFixture.get<Queue>(getQueueToken(VIDEO_PROCESSING.QUEUE));
+
+    // The worker runs inside the test process, on the code of this checkout,
+    // instead of relying on the container (phase-03-videos/TD-12).
+    workerModule = await Test.createTestingModule({
+      imports: [WorkerModule],
+    }).compile();
+    await workerModule.init();
+
+    queueEvents = new QueueEvents(VIDEO_PROCESSING.QUEUE, {
+      connection: queue.opts.connection,
+      prefix: queue.opts.prefix,
+    });
+    await queueEvents.waitUntilReady();
   });
 
   afterAll(async () => {
+    // Obliterate before closing: leaving jobs under the test prefix would make
+    // the next run start with work already queued.
+    await queue.obliterate({ force: true });
+    await queueEvents.close();
+    await workerModule.close();
     await app.close();
   });
 
@@ -653,5 +690,142 @@ describe('Videos (e2e)', () => {
         expect(response.body.error).toBe('VIDEO_NOT_FOUND');
       },
     );
+  });
+  describe('fluxo completo: upload, processamento e entrega', () => {
+    /**
+     * Runs the real client flow: opens the draft, uploads the bytes straight
+     * to the storage and closes the multipart upload, which enqueues the job.
+     */
+    async function uploadAndComplete(
+      accessToken: string,
+      content: Buffer,
+    ): Promise<{ publicId: string; videoId: string }> {
+      const draft = await request(app.getHttpServer())
+        .post('/videos')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ ...VALID_BODY, size_bytes: content.length })
+        .expect(201);
+
+      const publicId = (draft.body as { id: string }).id;
+
+      const signed = await request(app.getHttpServer())
+        .post(`/videos/${publicId}/upload/parts`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ part_numbers: [1] })
+        .expect(200);
+
+      const url = (signed.body as { parts: { url: string }[] }).parts[0].url;
+      const upload = await fetchSignedUrl(url, {
+        method: 'PUT',
+        body: content,
+      });
+      expect(upload.status).toBe(200);
+
+      await request(app.getHttpServer())
+        .post(`/videos/${publicId}/upload/complete`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({
+          parts: [{ part_number: 1, etag: upload.headers.get('etag')! }],
+        })
+        .expect(200);
+
+      // The job id is the internal uuid, not the public one.
+      const [{ id }] = await dataSource.query<{ id: string }[]>(
+        `SELECT "id" FROM "videos" WHERE "public_id" = $1`,
+        [publicId],
+      );
+
+      return { publicId, videoId: id };
+    }
+
+    /**
+     * Deterministic wait: resolves on the job's own completion event instead
+     * of polling the database on a timer.
+     */
+    async function processingOf(videoId: string): Promise<unknown> {
+      const job = await queue.getJob(videoId);
+      expect(job).toBeDefined();
+      return job!.waitUntilFinished(queueEvents, 60_000);
+    }
+
+    it('leva um vídeo real de upload a ready, com metadados, thumbnail, stream e download', async () => {
+      const accessToken = await authenticate();
+      const content = await createVideoFixture({
+        durationSeconds: 2,
+        width: 320,
+        height: 240,
+      });
+
+      const { publicId, videoId } = await uploadAndComplete(
+        accessToken,
+        content,
+      );
+      await processingOf(videoId);
+
+      const details = await request(app.getHttpServer())
+        .get(`/videos/${publicId}`)
+        .expect(200);
+
+      expect(details.body.processing_status).toBe('ready');
+      expect(details.body.processing_error).toBeNull();
+      expect(details.body.duration_seconds).toBe(2);
+      expect(details.body.metadata.width).toBe(320);
+      expect(details.body.metadata.height).toBe(240);
+      expect(details.body.metadata.video_codec).toBe('h264');
+
+      // The thumbnail is a real object the worker wrote, not just a key.
+      const thumbnail = await fetchSignedUrl(details.body.thumbnail_url);
+      expect(thumbnail.status).toBe(200);
+      expect(thumbnail.headers.get('content-type')).toBe('image/jpeg');
+      expect((await thumbnail.buffer()).length).toBeGreaterThan(0);
+
+      const streamRedirect = await request(app.getHttpServer())
+        .get(`/videos/${publicId}/stream`)
+        .expect(302);
+      const ranged = await fetchSignedUrl(streamRedirect.headers.location, {
+        headers: { range: 'bytes=0-1023' },
+      });
+
+      expect(ranged.status).toBe(206);
+      expect(ranged.headers.get('content-range')).toBe(
+        `bytes 0-1023/${content.length}`,
+      );
+
+      const downloadRedirect = await request(app.getHttpServer())
+        .get(`/videos/${publicId}/download`)
+        .expect(302);
+      const download = await fetchSignedUrl(downloadRedirect.headers.location);
+
+      expect(download.status).toBe(200);
+      expect(download.headers.get('content-disposition')).toBe(
+        `attachment; filename="${VALID_BODY.filename}"`,
+      );
+      // The bytes that come back are the ones that went up.
+      expect((await download.buffer()).equals(content)).toBe(true);
+    }, 120_000);
+
+    it('deixa em failed, com o motivo preenchido, um arquivo que o ffprobe rejeita', async () => {
+      const accessToken = await authenticate();
+      const { publicId, videoId } = await uploadAndComplete(
+        accessToken,
+        createCorruptFixture(),
+      );
+
+      await expect(processingOf(videoId)).rejects.toThrow();
+
+      // Not ready, so only the owner sees it.
+      const details = await request(app.getHttpServer())
+        .get(`/videos/${publicId}`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      expect(details.body.processing_status).toBe('failed');
+      expect(details.body.processing_error).toBeTruthy();
+      expect(details.body.thumbnail_url).toBeNull();
+
+      await request(app.getHttpServer())
+        .get(`/videos/${publicId}/stream`)
+        .expect(409);
+    }, 120_000);
   });
 });
