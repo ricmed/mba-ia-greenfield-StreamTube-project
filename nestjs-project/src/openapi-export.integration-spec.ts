@@ -49,6 +49,44 @@ describe('exportSpec (integration)', () => {
     expect(Object.keys(schemas).length).toBeGreaterThan(0);
   });
 
+  it('exports every schema with its properties', () => {
+    const components = document.components as Record<string, unknown>;
+    const schemas = components.schemas as Record<
+      string,
+      Record<string, unknown>
+    >;
+
+    // The export runs under ts-node, where the swagger CLI plugin does not
+    // transform the DTOs. A schema that comes out as an empty object means its
+    // class lost (or never had) explicit @ApiProperty decorators, and the
+    // frontend would generate a client with no request body at all.
+    const empty = Object.entries(schemas)
+      .filter(
+        ([, schema]) =>
+          Object.keys((schema.properties ?? {}) as Record<string, unknown>)
+            .length === 0,
+      )
+      .map(([name]) => name);
+
+    expect(empty).toEqual([]);
+  });
+
+  it('carries the class-validator constraints of each documented DTO', () => {
+    const components = document.components as Record<string, unknown>;
+    const schemas = components.schemas as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const props = schemas['RegisterDto'].properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+
+    expect(props.email).toMatchObject({ type: 'string', format: 'email' });
+    expect(props.password).toMatchObject({ minLength: 8, maxLength: 128 });
+    expect(schemas['RegisterDto'].required).toEqual(['email', 'password']);
+  });
+
   it('includes ApiErrorEnvelope schema with expected properties', () => {
     const components = document.components as Record<string, unknown>;
     const schemas = components.schemas as Record<
