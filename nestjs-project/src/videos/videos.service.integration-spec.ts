@@ -4,8 +4,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
 import { DataSource, Repository } from 'typeorm';
-import { RefreshToken } from '../auth/entities/refresh-token.entity';
-import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { Channel } from '../channels/entities/channel.entity';
 import appConfig from '../config/app.config';
 import queueConfig from '../config/queue.config';
@@ -13,6 +11,7 @@ import storageConfig from '../config/storage.config';
 import { StorageService } from '../storage/storage.service';
 import { fetchSignedUrl } from '../test/signed-url';
 import {
+  ALL_ENTITIES,
   cleanAllTables,
   createTestDataSource,
 } from '../test/create-test-data-source';
@@ -25,8 +24,6 @@ import {
 import { VideosModule } from './videos.module';
 import { VIDEO_PROCESSING } from './video-processing.constants';
 import { VideosService } from './videos.service';
-
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
 
 describe('VideosService — createDraft (integration)', () => {
   let module: TestingModule;

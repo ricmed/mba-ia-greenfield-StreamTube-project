@@ -5,8 +5,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Job, Queue, UnrecoverableError } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { DataSource, Repository } from 'typeorm';
-import { RefreshToken } from '../auth/entities/refresh-token.entity';
-import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { Channel } from '../channels/entities/channel.entity';
 import queueConfig from '../config/queue.config';
 import storageConfig from '../config/storage.config';
@@ -14,6 +12,7 @@ import { originalKey } from '../storage/storage.constants';
 import { StorageModule } from '../storage/storage.module';
 import { StorageService } from '../storage/storage.service';
 import {
+  ALL_ENTITIES,
   cleanAllTables,
   createTestDataSource,
 } from '../test/create-test-data-source';
@@ -30,8 +29,6 @@ import {
 import { FfmpegService } from './ffmpeg.service';
 import { VIDEO_PROCESSING } from './video-processing.constants';
 import { VideoProcessor } from './video.processor';
-
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
 
 describe('VideoProcessor (integration)', () => {
   let module: TestingModule;
