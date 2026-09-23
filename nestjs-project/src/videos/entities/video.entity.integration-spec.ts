@@ -82,9 +82,7 @@ describe('Video entity (integration)', () => {
     const first = await videoRepository.save(buildVideo(channel));
 
     await expect(
-      videoRepository.save(
-        buildVideo(channel, { public_id: first.public_id }),
-      ),
+      videoRepository.save(buildVideo(channel, { public_id: first.public_id })),
     ).rejects.toBeInstanceOf(QueryFailedError);
   });
 

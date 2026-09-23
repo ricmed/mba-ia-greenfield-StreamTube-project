@@ -83,7 +83,10 @@ export class StorageService implements OnModuleInit {
     }
   }
 
-  async createMultipartUpload(key: string, contentType: string): Promise<string> {
+  async createMultipartUpload(
+    key: string,
+    contentType: string,
+  ): Promise<string> {
     const response = await this.internalClient.send(
       new CreateMultipartUploadCommand({
         Bucket: this.storage.bucket,

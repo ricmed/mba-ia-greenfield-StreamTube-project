@@ -13,7 +13,11 @@ import * as https from 'https';
  */
 export async function fetchSignedUrl(
   signedUrl: string,
-  init: { method?: string; body?: Buffer; headers?: Record<string, string> } = {},
+  init: {
+    method?: string;
+    body?: Buffer;
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<{
   status: number;
   headers: Map<string, string>;

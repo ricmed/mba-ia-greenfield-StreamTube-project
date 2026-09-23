@@ -101,7 +101,9 @@ describe('StorageService (integration)', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get('content-disposition')).toContain('attachment');
-    expect(response.headers.get('content-disposition')).toContain('my video.mp4');
+    expect(response.headers.get('content-disposition')).toContain(
+      'my video.mp4',
+    );
   });
 
   it('should sign an internal url usable from inside the network', async () => {
