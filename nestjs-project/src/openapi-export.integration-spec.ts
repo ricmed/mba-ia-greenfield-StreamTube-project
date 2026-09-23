@@ -128,4 +128,143 @@ describe('exportSpec (integration)', () => {
       }
     }
   });
+
+  describe('videos endpoints', () => {
+    const API_ERROR_REF = '#/components/schemas/ApiErrorEnvelope';
+
+    /** Every endpoint of the phase, with the status codes of the Error Catalog. */
+    const ENDPOINTS: [string, string, string[]][] = [
+      ['/videos', 'post', ['201', '400', '401', '404', '413', '415']],
+      [
+        '/videos/{publicId}/upload/parts',
+        'post',
+        ['200', '400', '401', '403', '404', '409'],
+      ],
+      [
+        '/videos/{publicId}/upload/complete',
+        'post',
+        ['200', '400', '401', '403', '404', '409', '422'],
+      ],
+      [
+        '/videos/{publicId}/upload',
+        'delete',
+        ['204', '401', '403', '404', '409'],
+      ],
+      ['/videos/{publicId}', 'get', ['200', '404']],
+      ['/videos/{publicId}/stream', 'get', ['302', '404', '409']],
+      ['/videos/{publicId}/download', 'get', ['302', '404', '409']],
+    ];
+
+    function operationOf(
+      path: string,
+      method: string,
+    ): Record<string, unknown> {
+      const paths = document.paths as Record<
+        string,
+        Record<string, Record<string, unknown>>
+      >;
+      const operation = paths[path]?.[method];
+      expect(operation).toBeDefined();
+      return operation;
+    }
+
+    it.each(ENDPOINTS)(
+      'documents %s (%s) with a summary under the videos tag',
+      (path, method) => {
+        const operation = operationOf(path, method);
+
+        expect(operation.tags).toContain('videos');
+        expect(typeof operation.summary).toBe('string');
+        expect((operation.summary as string).length).toBeGreaterThan(0);
+      },
+    );
+
+    it.each(ENDPOINTS)(
+      'declares every response of %s (%s) from the Error Catalog',
+      (path, method, statuses) => {
+        const responses = operationOf(path, method).responses as Record<
+          string,
+          unknown
+        >;
+
+        expect(Object.keys(responses).sort()).toEqual(statuses);
+      },
+    );
+
+    it.each(ENDPOINTS)(
+      'uses the shared error envelope on every 4xx of %s (%s)',
+      (path, method, statuses) => {
+        const responses = operationOf(path, method).responses as Record<
+          string,
+          Record<string, unknown>
+        >;
+
+        for (const status of statuses.filter((s) => s.startsWith('4'))) {
+          const content = responses[status].content as Record<
+            string,
+            Record<string, unknown>
+          >;
+          const schema = content['application/json'].schema as Record<
+            string,
+            unknown
+          >;
+          expect(schema['$ref']).toBe(API_ERROR_REF);
+        }
+      },
+    );
+
+    it('requires the access token on the upload endpoints only', () => {
+      for (const [path, method] of ENDPOINTS) {
+        const security = operationOf(path, method).security as
+          | Array<Record<string, unknown>>
+          | undefined;
+        // The three read/delivery routes are the GETs; everything else is an
+        // upload operation restricted to the owner.
+        if (method === 'get') {
+          // Advertising auth on a public media route would be a lie the
+          // frontend acts on.
+          expect(security).toBeUndefined();
+        } else {
+          expect(security?.some((req) => 'access-token' in req)).toBe(true);
+        }
+      }
+    });
+
+    it.each(['/videos/{publicId}/stream', '/videos/{publicId}/download'])(
+      'describes the redirect headers of %s',
+      (path) => {
+        const responses = operationOf(path, 'get').responses as Record<
+          string,
+          Record<string, unknown>
+        >;
+        const headers = responses['302'].headers as Record<string, unknown>;
+
+        expect(headers).toHaveProperty('Location');
+        expect(headers).toHaveProperty('Cache-Control');
+      },
+    );
+
+    it.each([
+      'CreateVideoDto',
+      'SignUploadPartsDto',
+      'CompleteUploadDto',
+      'UploadedPartDto',
+      'VideoResponseDto',
+      'VideoMetadataDto',
+    ])('exports %s with its properties', (name) => {
+      const components = document.components as Record<string, unknown>;
+      const schemas = components.schemas as Record<
+        string,
+        Record<string, unknown>
+      >;
+
+      expect(schemas[name]).toBeDefined();
+      // The export runs under ts-node, where the swagger CLI plugin does not
+      // transform the DTOs — only explicit @ApiProperty keeps the exported
+      // contract from degrading to an empty object.
+      expect(
+        Object.keys(schemas[name].properties as Record<string, unknown>).length,
+      ).toBeGreaterThan(0);
+    });
+  });
 });

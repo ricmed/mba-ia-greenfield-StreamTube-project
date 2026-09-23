@@ -1,3 +1,4 @@
+import { ApiProperty } from '@nestjs/swagger';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -14,6 +15,14 @@ import {
  * URLs are signed per call (phase-03-videos/TD-02).
  */
 export class SignUploadPartsDto {
+  @ApiProperty({
+    description:
+      'Part numbers to sign. Calling again re-signs parts whose URL expired.',
+    type: [Number],
+    minItems: 1,
+    maxItems: 1000,
+    example: [1, 2, 3],
+  })
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(1000)

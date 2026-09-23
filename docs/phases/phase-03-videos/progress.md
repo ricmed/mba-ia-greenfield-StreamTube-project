@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 11/14 completed
+**SIs:** 12/14 completed
 
 ### SI-03.1 — Infraestrutura: dependências, configuração e serviços no Compose
 - **Status:** completed
@@ -100,9 +100,13 @@
   - O teste de `Range` valida o critério de aceite ponta a ponta contra o MinIO real: `206`, `Content-Range: bytes 0-1023/65536` e 1024 bytes que conferem com o trecho original.
 
 ### SI-03.12 — Documentação OpenAPI dos endpoints de vídeo
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 68/68 passing na rodada (openapi-export.integration-spec.ts = 39; videos.e2e-spec.ts = 29 como regressão das rotas)
+- **Observations:**
+  - **Defeito encontrado no artefato herdado:** o `openapi.json` versionado exporta os DTOs da fase 02 com `properties: {}`. O plugin do `@nestjs/swagger` só roda no transformer do `nest build`/`nest start`, e `npm run openapi:export` usa `ts-node` puro — o `src/metadata.ts` é um stub que devolve `{}`. Em dev a UI fica correta; o arquivo exportado, que é o contrato consumido pelo frontend, é que degrada. Anotei os DTOs de vídeo com `@ApiProperty` explícito (funciona nos dois caminhos), e há teste que falha se algum deles voltar a exportar objeto vazio. Corrigir os DTOs da fase 02 ficou como tarefa separada, por escopo.
+  - `@ApiBearerAuth()` estava no nível da classe do `VideosController`, sem nome de scheme. Isso anunciaria auth também nas 3 rotas `@Public()` e referenciaria um scheme `bearer` inexistente (o declarado é `access-token`). Passou para `@ApiBearerAuth('access-token')` por método, só nos 4 endpoints de upload — há teste garantindo que as rotas públicas não declaram `security`.
+  - `VideoMetadata` é interface e não gera schema; criado `VideoMetadataDto implements VideoMetadata` para o `metadata` do response ter forma no contrato.
+  - Validação extra do spec exportado: todos os `$ref` resolvem e toda resposta tem `description` — os dois erros que quebram a UI do Swagger.
 
 ### SI-03.13 — E2E do fluxo completo: upload, processamento e entrega
 - **Status:** pending
