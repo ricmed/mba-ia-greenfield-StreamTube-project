@@ -18,13 +18,50 @@ This is a monorepo with two main areas:
 
 See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 
-- **Frontend** (Next.js) → calls API via REST, streams from Object Storage
-- **API** (Nest.js) → business rules, auth, reads/writes DB, uploads to storage, publishes jobs to queue, sends emails
+- **Frontend** (Next.js) → calls API via REST; uploads parts to, and streams from, Object Storage
+- **API** (Nest.js) → business rules, auth, reads/writes DB, signs storage URLs, publishes jobs to queue, sends emails
 - **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
 - **Database** (PostgreSQL) → users, channels, videos, comments, likes
 - **Object Storage** (S3/MinIO) → video files and thumbnails
-- **Message Queue** (TBD) → video processing job queue
+- **Message Queue** (BullMQ on Redis) → video processing job queue
 - **Email Service** (SMTP) → account confirmation and password recovery
+
+Video bytes never pass through the API — see **Videos** below.
+
+## Videos
+
+The upload is **direct to storage**. The API only orchestrates it, so a 10 GB
+file never occupies an API process.
+
+1. `POST /videos` pre-registers the video as a `draft` and opens an S3
+   multipart upload, answering with the public id, the part size and the
+   number of parts.
+2. `POST /videos/:publicId/upload/parts` signs one URL per requested part. The
+   client `PUT`s each part straight to the storage. Calling it again re-signs
+   parts whose URL expired — that is how an interrupted upload resumes.
+3. `POST /videos/:publicId/upload/complete` assembles the parts, checks the
+   resulting size against the declared one and enqueues `video.process`. It is
+   idempotent: the job id is the video id.
+4. The **Video Worker** consumes the job, reads the object through a presigned
+   URL (ffprobe seeks over HTTP Range instead of downloading the file), stores
+   duration and metadata, extracts a frame as the thumbnail and moves the video
+   to `ready` — or to `failed` with `processing_error`.
+5. `GET /videos/:publicId/stream` and `GET /videos/:publicId/download` answer
+   `302` to a short-lived presigned URL. The storage serves `Range` requests
+   with `206 Partial Content`, so playback never needs the whole file; the
+   download URL carries `Content-Disposition: attachment`.
+
+`DELETE /videos/:publicId/upload` aborts an upload in progress and discards the
+draft. `GET /videos/:publicId` returns the metadata.
+
+**Two orthogonal states.** `status` is editorial (only `draft` today; phase 04
+adds publishing) and `processing_status` is technical:
+`uploading → processing → ready | failed`. Do not overload one with the other.
+
+**Visibility.** The delivery and read routes are public: access is protected by
+the unguessable 64-bit `public_id`. A video that is not `ready` is visible only
+to its owner, and to anyone else it answers the same `404` as an unknown id —
+never `403`, which would confirm that the id exists.
 
 ## Docker Networking
 

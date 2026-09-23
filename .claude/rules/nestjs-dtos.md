@@ -15,33 +15,48 @@ description: 'DTO conventions for input validation and data transfer'
 
 DTOs are the source of request/response schemas in the exported `openapi.json`. Field-level documentation is the DTO's responsibility — controllers document operations (status codes, summaries), not schemas.
 
-### Default: rely on the Swagger CLI plugin (request DTOs)
+### Every field needs an explicit `@ApiProperty`
 
-The project runs the `@nestjs/swagger` CLI plugin, configured in `nestjs-project/nest-cli.json` with `classValidatorShim: true` and `introspectComments: true`. For a request DTO that already carries `class-validator` decorators (`@IsEmail`, `@IsString`, `@MinLength`, `@MaxLength`, `@IsOptional`, `@Type`, …), the plugin auto-generates `@ApiProperty` from those decorators and from the TypeScript type of the field. Do **not** add `@ApiProperty` manually in this case:
+This holds for request DTOs as much as for response DTOs. Do not rely on the `@nestjs/swagger` CLI plugin configured in `nestjs-project/nest-cli.json`.
 
-- It is redundant — the plugin already emits the same metadata.
-- It drifts from the validation rule. `@ApiProperty({ minLength: 8 })` on a field with `@MinLength(8)` becomes a lie the day someone changes the validator to `@MinLength(12)` and forgets the swagger annotation.
+The plugin is real, and in `nest build` / `nest start` it does infer `@ApiProperty` from the `class-validator` decorators. But it only works as a **TypeScript AST transformer**, and the exported contract is not produced that way:
 
-For `description` and `example`, write a JSDoc comment above the field — `introspectComments: true` picks it up:
+- `npm run openapi:export` runs under `ts-node`, with no transformer.
+- The Jest suites run under `ts-jest`, likewise.
+
+In both paths an unannotated DTO is exported as `{"properties": {}}` — and `openapi.json` is the artifact the Next.js frontend consumes, so a client generated from it would have no request body at all. This was a real defect: every auth DTO shipped empty until it was fixed.
+
+Generating the metadata ahead of time with `PluginMetadataGenerator` does **not** rescue the ts-node path in this project. The generated file emits relative dynamic imports, and `moduleResolution: nodenext` rejects them without a `.js` extension while ts-node fails to resolve them with one — both forms raise `ERR_MODULE_NOT_FOUND`. See the comment in `nestjs-project/src/metadata.ts`.
+
+Mirror the validator in the annotation, and keep the two in sync when either changes:
 
 ```typescript
-export class LoginDto {
-  /** User's registered email. */
+export class RegisterDto {
+  @ApiProperty({
+    description: 'Address the confirmation link is sent to',
+    format: 'email',
+    example: 'someone@example.com',
+  })
   @IsEmail()
   email: string;
+
+  @ApiProperty({ minLength: 8, maxLength: 128 })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(128)
+  password: string;
 }
 ```
 
-Canonical request DTO: `nestjs-project/src/auth/dto/register.dto.ts` (purely `class-validator`, zero `@ApiProperty`).
+The duplication between `@MinLength(8)` and `minLength: 8` is the cost of an accurate exported contract. The regression test `exports every schema with its properties`, in `nestjs-project/src/openapi-export.integration-spec.ts`, fails the build if any schema comes out empty — a DTO added without annotations breaks the suite instead of silently degrading the contract.
 
-### When `@ApiProperty` is required
+Canonical request DTO: `nestjs-project/src/auth/dto/register.dto.ts`. Canonical response DTO: `nestjs-project/src/common/openapi/api-error-envelope.dto.ts`.
 
-Annotate fields explicitly when the plugin cannot infer them:
+### Cases that need more than the plain annotation
 
-- **Response DTOs** — shapes that are not validated input have no `class-validator` decorators, so the plugin has nothing to introspect. Every field needs `@ApiProperty`. Canonical example: `nestjs-project/src/common/openapi/api-error-envelope.dto.ts`.
-- **Polymorphic / union types** (e.g., `string | string[]`, `oneOf`) — the plugin does not infer unions. Use `@ApiProperty({ oneOf: [...] })`.
-- **Optional / nullable fields on a response DTO** — declare `@ApiProperty({ required: false, nullable: true })`.
-- **Controlled `example`** that differs from the inferred type (UUID, ISO date, formatted slug, etc.).
+- **Polymorphic / union types** (e.g., `string | string[]`, `oneOf`) — use `@ApiProperty({ oneOf: [...] })`.
+- **Optional / nullable fields** — declare `@ApiProperty({ required: false, nullable: true })`.
+- **Interfaces used as a field type** — an interface produces no schema. Declare a DTO class that implements it, as `VideoMetadataDto` does in `nestjs-project/src/videos/dto/video-response.dto.ts`.
 
 ### Reuse the shared error envelope
 

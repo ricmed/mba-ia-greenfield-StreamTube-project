@@ -1,6 +1,9 @@
 FROM node:25.6.0-slim
 
-RUN apt update && apt install -y procps curl
+# ffmpeg/ffprobe are used by the video worker (TD-07) and by the integration
+# tests that generate video fixtures (TD-12), so they ship in the same image
+# that serves the API, the worker and the test runner.
+RUN apt update && apt install -y procps curl ffmpeg
 
 WORKDIR /home/node/app
 

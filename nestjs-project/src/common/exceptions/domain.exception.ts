@@ -39,6 +39,52 @@ export class TokenExpiredException extends DomainException {
   }
 }
 
+export class VideoNotFoundException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_FOUND', 404, 'Video not found');
+  }
+}
+
+export class NotVideoOwnerException extends DomainException {
+  constructor() {
+    super('NOT_VIDEO_OWNER', 403, 'Video belongs to another channel');
+  }
+}
+
+export class UploadNotInProgressException extends DomainException {
+  constructor() {
+    super('UPLOAD_NOT_IN_PROGRESS', 409, 'Video has no upload in progress');
+  }
+}
+
+export class UploadSizeMismatchException extends DomainException {
+  constructor() {
+    super(
+      'UPLOAD_SIZE_MISMATCH',
+      422,
+      'Uploaded size does not match the declared size',
+    );
+  }
+}
+
+export class FileTooLargeException extends DomainException {
+  constructor() {
+    super('FILE_TOO_LARGE', 413, 'File exceeds the maximum allowed size');
+  }
+}
+
+export class UnsupportedMediaTypeException extends DomainException {
+  constructor() {
+    super('UNSUPPORTED_MEDIA_TYPE', 415, 'Only video files are accepted');
+  }
+}
+
+export class VideoNotReadyException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_READY', 409, 'Video has not finished processing');
+  }
+}
+
 export class TokenReuseDetectedException extends DomainException {
   constructor() {
     super(
