@@ -7,6 +7,7 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
+import { StorageService } from '../src/storage/storage.service';
 import { cleanAllTables } from '../src/test/create-test-data-source';
 import { fetchSignedUrl } from '../src/test/signed-url';
 
@@ -21,6 +22,7 @@ describe('Videos (e2e)', () => {
   let app: INestApplication<App>;
   let dataSource: DataSource;
   let throttlerStorage: ThrottlerStorageService;
+  let storageService: StorageService;
   let counter = 0;
 
   beforeAll(async () => {
@@ -45,6 +47,7 @@ describe('Videos (e2e)', () => {
     dataSource = moduleFixture.get(DataSource);
     throttlerStorage =
       moduleFixture.get<ThrottlerStorageService>(ThrottlerStorage);
+    storageService = moduleFixture.get(StorageService);
   });
 
   afterAll(async () => {
@@ -528,5 +531,127 @@ describe('Videos (e2e)', () => {
       expect(response.body.processing_status).toBe('failed');
       expect(response.body.processing_error).toBe('ffprobe rejected the file');
     });
+  });
+
+  describe('delivery (stream and download)', () => {
+    const CONTENT = Buffer.alloc(64 * 1024, 'z');
+
+    /**
+     * Puts a real object in the storage under the draft's key and marks the
+     * video ready, as the worker would. The bytes are written directly instead
+     * of going through the multipart completion so the running worker does not
+     * race this test by flipping the status while it asserts — the full flow
+     * with the real worker is covered in SI-03.13.
+     */
+    async function readyVideoWithBytes(accessToken: string): Promise<string> {
+      const draft = await request(app.getHttpServer())
+        .post('/videos')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ ...VALID_BODY, size_bytes: CONTENT.length })
+        .expect(201);
+
+      const publicId = (draft.body as { id: string }).id;
+      const [{ storage_key }] = await dataSource.query<
+        { storage_key: string }[]
+      >(`SELECT "storage_key" FROM "videos" WHERE "public_id" = $1`, [
+        publicId,
+      ]);
+
+      await storageService.putObject(storage_key, CONTENT, 'video/mp4');
+      await dataSource.query(
+        `UPDATE "videos"
+         SET "processing_status" = 'ready', "upload_id" = NULL
+         WHERE "public_id" = $1`,
+        [publicId],
+      );
+
+      return publicId;
+    }
+
+    it('should redirect an anonymous viewer to the storage without carrying bytes', async () => {
+      const accessToken = await authenticate();
+      const publicId = await readyVideoWithBytes(accessToken);
+
+      const response = await request(app.getHttpServer())
+        .get(`/videos/${publicId}/stream`)
+        .expect(302);
+
+      expect(response.headers.location).toContain('X-Amz-Signature');
+      expect(response.headers['cache-control']).toBe('no-store');
+      // The redirect itself is empty: no video byte goes through the API.
+      expect(response.body).toEqual({});
+    });
+
+    it('should serve a byte range from the redirect target without downloading the whole file', async () => {
+      const accessToken = await authenticate();
+      const publicId = await readyVideoWithBytes(accessToken);
+
+      const redirect = await request(app.getHttpServer())
+        .get(`/videos/${publicId}/stream`)
+        .expect(302);
+
+      const ranged = await fetchSignedUrl(redirect.headers.location, {
+        headers: { range: 'bytes=0-1023' },
+      });
+
+      expect(ranged.status).toBe(206);
+      expect(ranged.headers.get('content-range')).toBe(
+        `bytes 0-1023/${CONTENT.length}`,
+      );
+      expect(ranged.headers.get('accept-ranges')).toBe('bytes');
+
+      const body = await ranged.buffer();
+      expect(body).toHaveLength(1024);
+      expect(body.equals(CONTENT.subarray(0, 1024))).toBe(true);
+    });
+
+    it('should hand the download the original filename as an attachment', async () => {
+      const accessToken = await authenticate();
+      const publicId = await readyVideoWithBytes(accessToken);
+
+      const redirect = await request(app.getHttpServer())
+        .get(`/videos/${publicId}/download`)
+        .expect(302);
+
+      const download = await fetchSignedUrl(redirect.headers.location);
+
+      expect(download.status).toBe(200);
+      expect(download.headers.get('content-disposition')).toBe(
+        `attachment; filename="${VALID_BODY.filename}"`,
+      );
+      expect(await download.buffer()).toHaveLength(CONTENT.length);
+    });
+
+    it.each(['stream', 'download'])(
+      'should return 409 on %s while the video is not ready',
+      async (route) => {
+        const accessToken = await authenticate();
+        const draft = await request(app.getHttpServer())
+          .post('/videos')
+          .set('Authorization', `Bearer ${accessToken}`)
+          .send(VALID_BODY)
+          .expect(201);
+        const publicId = (draft.body as { id: string }).id;
+
+        // Not even the owner gets a delivery URL before processing ends.
+        const response = await request(app.getHttpServer())
+          .get(`/videos/${publicId}/${route}`)
+          .set('Authorization', `Bearer ${accessToken}`)
+          .expect(409);
+
+        expect(response.body.error).toBe('VIDEO_NOT_READY');
+      },
+    );
+
+    it.each(['stream', 'download'])(
+      'should return 404 on %s for an unknown public id',
+      async (route) => {
+        const response = await request(app.getHttpServer())
+          .get(`/videos/doesnotexi/${route}`)
+          .expect(404);
+
+        expect(response.body.error).toBe('VIDEO_NOT_FOUND');
+      },
+    );
   });
 });

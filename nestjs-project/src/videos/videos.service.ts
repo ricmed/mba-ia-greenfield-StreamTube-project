@@ -12,6 +12,7 @@ import {
   UploadNotInProgressException,
   UploadSizeMismatchException,
   VideoNotFoundException,
+  VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
 import { originalKey } from '../storage/storage.constants';
 import {
@@ -27,6 +28,9 @@ import {
 } from './entities/video.entity';
 import { persistWithUniquePublicId } from './public-id.util';
 import { VideoProcessingProducer } from './video-processing.producer';
+
+/** Which delivery URL to sign: inline playback or a browser download. */
+export type DeliveryMode = 'stream' | 'download';
 
 export interface CreatedDraft {
   video: Video;
@@ -208,6 +212,33 @@ export class VideosService {
     }
 
     return video;
+  }
+
+  /**
+   * Signs a short-lived delivery URL for the original file
+   * (phase-03-videos/TD-10). No video bytes pass through the API: the caller
+   * follows the redirect and the storage answers `Range` with `206` natively,
+   * so playback never needs the whole file.
+   *
+   * Only a `ready` video is deliverable — before that the object may be a
+   * half-assembled upload — and that holds for the owner too, unlike the
+   * metadata read.
+   */
+  async buildDeliveryUrl(
+    publicId: string,
+    mode: DeliveryMode,
+  ): Promise<string> {
+    const video = await this.findByPublicIdOrFail(publicId);
+
+    if (video.processing_status !== VideoProcessingStatus.READY) {
+      throw new VideoNotReadyException();
+    }
+
+    return this.storageService.presignGetObject(video.storage_key, {
+      ...(mode === 'download' && {
+        downloadFilename: video.original_filename,
+      }),
+    });
   }
 
   /** Short-lived signed URL for the thumbnail, when the worker already made one. */

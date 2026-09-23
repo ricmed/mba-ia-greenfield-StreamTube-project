@@ -8,6 +8,7 @@ import {
   UploadNotInProgressException,
   UploadSizeMismatchException,
   VideoNotFoundException,
+  VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
 import storageConfig from '../config/storage.config';
 import { StorageService } from '../storage/storage.service';
@@ -381,6 +382,61 @@ describe('VideosService', () => {
 
       await expect(
         service.findForViewer('abcdefghijk', 'user-2'),
+      ).rejects.toBeInstanceOf(VideoNotFoundException);
+    });
+  });
+
+  describe('buildDeliveryUrl', () => {
+    const readyVideo = {
+      public_id: 'abcdefghijk',
+      storage_key: 'videos/video-1/original',
+      original_filename: 'my-video.mp4',
+      processing_status: VideoProcessingStatus.READY,
+    } as Video;
+
+    it('should sign the original file without a disposition for streaming', async () => {
+      repository.findOneBy.mockResolvedValue(readyVideo);
+
+      await service.buildDeliveryUrl('abcdefghijk', 'stream');
+
+      expect(storage.presignGetObject).toHaveBeenCalledWith(
+        'videos/video-1/original',
+        {},
+      );
+    });
+
+    it('should sign the download with the original filename as attachment', async () => {
+      repository.findOneBy.mockResolvedValue(readyVideo);
+
+      await service.buildDeliveryUrl('abcdefghijk', 'download');
+
+      expect(storage.presignGetObject).toHaveBeenCalledWith(
+        'videos/video-1/original',
+        { downloadFilename: 'my-video.mp4' },
+      );
+    });
+
+    it.each([
+      VideoProcessingStatus.UPLOADING,
+      VideoProcessingStatus.PROCESSING,
+      VideoProcessingStatus.FAILED,
+    ])('should refuse to deliver a video in %s', async (status) => {
+      repository.findOneBy.mockResolvedValue({
+        ...readyVideo,
+        processing_status: status,
+      });
+
+      await expect(
+        service.buildDeliveryUrl('abcdefghijk', 'stream'),
+      ).rejects.toBeInstanceOf(VideoNotReadyException);
+      expect(storage.presignGetObject).not.toHaveBeenCalled();
+    });
+
+    it('should reject an unknown public id', async () => {
+      repository.findOneBy.mockResolvedValue(null);
+
+      await expect(
+        service.buildDeliveryUrl('doesnotexi', 'stream'),
       ).rejects.toBeInstanceOf(VideoNotFoundException);
     });
   });

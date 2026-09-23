@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 10/14 completed
+**SIs:** 11/14 completed
 
 ### SI-03.1 — Infraestrutura: dependências, configuração e serviços no Compose
 - **Status:** completed
@@ -91,9 +91,13 @@
   - O e2e marca o vídeo como `ready` direto no banco em vez de esperar o worker; o fluxo com worker real é o escopo do SI-03.13.
 
 ### SI-03.11 — Streaming e download via redirect presigned
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 58/58 passing na rodada (videos.service.spec.ts = 29; videos.e2e-spec.ts = 29)
+- **Observations:**
+  - `@Redirect()` sem argumento funciona porque o decorator do Nest 11 usa `url = ''` como padrão e o `router-execution-context` só liga o caminho de redirect quando `url` é string — um `@Redirect(undefined)` explícito desativaria silenciosamente o redirect e o handler devolveria `200` com `{ url }` no corpo. O `@Header('Cache-Control','no-store')` é aplicado antes da execução do handler, então vale também nas respostas de erro.
+  - `VIDEO_NOT_READY` vale **inclusive para o dono**, diferente da consulta de metadados do SI-03.10: antes de `ready` o objeto no storage pode ser um upload semi-montado.
+  - O e2e grava os bytes direto no storage (`putObject`) em vez de passar pela conclusão do multipart. A conclusão enfileira o job e o `video-worker` que está de pé no Compose reprocessaria o vídeo no meio do teste, sobrescrevendo o `ready` por `failed` — corrida real, não hipotética. O fluxo completo com worker é o SI-03.13.
+  - O teste de `Range` valida o critério de aceite ponta a ponta contra o MinIO real: `206`, `Content-Range: bytes 0-1023/65536` e 1024 bytes que conferem com o trecho original.
 
 ### SI-03.12 — Documentação OpenAPI dos endpoints de vídeo
 - **Status:** pending

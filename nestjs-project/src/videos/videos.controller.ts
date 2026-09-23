@@ -3,10 +3,12 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Param,
   Post,
+  Redirect,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { JwtPayload } from '../auth/auth.types';
@@ -107,6 +109,39 @@ export class VideosController {
     @Param('publicId') publicId: string,
   ): Promise<void> {
     await this.videosService.abortUpload(user.sub, publicId);
+  }
+
+  /**
+   * Playback without a full download (phase-03-videos/TD-10): the API answers
+   * `302` and the storage serves the byte ranges the player asks for.
+   *
+   * Together with the download route below, this is the documented exception
+   * to the strict-BFF convention inherited from phase 02
+   * (phase-03-videos/TD-10, phase-03-videos/TD-11): the browser reaches these
+   * two public media routes directly — a `<video>` tag and a download link
+   * cannot go through the BFF — while every authenticated call still does.
+   */
+  @Public()
+  @Get(':publicId/stream')
+  @Redirect()
+  @Header('Cache-Control', 'no-store')
+  async stream(@Param('publicId') publicId: string): Promise<{ url: string }> {
+    return {
+      url: await this.videosService.buildDeliveryUrl(publicId, 'stream'),
+    };
+  }
+
+  /** Same redirect, signed so the storage sends the file as an attachment. */
+  @Public()
+  @Get(':publicId/download')
+  @Redirect()
+  @Header('Cache-Control', 'no-store')
+  async download(
+    @Param('publicId') publicId: string,
+  ): Promise<{ url: string }> {
+    return {
+      url: await this.videosService.buildDeliveryUrl(publicId, 'download'),
+    };
   }
 
   @Public()
