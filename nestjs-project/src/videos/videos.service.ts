@@ -186,6 +186,36 @@ export class VideosService {
     await this.videoRepository.delete({ id: video.id });
   }
 
+  /**
+   * Resolves a video for a viewer. The owner sees it in any state; everyone
+   * else only once it is `ready` — and a draft is reported as not found rather
+   * than forbidden, so the response does not confirm that the id exists
+   * (phase-03-videos/TD-11).
+   */
+  async findForViewer(publicId: string, userId?: string): Promise<Video> {
+    const video = await this.findByPublicIdOrFail(publicId);
+
+    if (video.processing_status === VideoProcessingStatus.READY) {
+      return video;
+    }
+
+    const channel = userId
+      ? await this.channelsService.findByUserId(userId)
+      : null;
+
+    if (!channel || channel.id !== video.channel_id) {
+      throw new VideoNotFoundException();
+    }
+
+    return video;
+  }
+
+  /** Short-lived signed URL for the thumbnail, when the worker already made one. */
+  async buildThumbnailUrl(video: Video): Promise<string | null> {
+    if (!video.thumbnail_key) return null;
+    return this.storageService.presignGetObject(video.thumbnail_key);
+  }
+
   async findByPublicIdOrFail(publicId: string): Promise<Video> {
     const video = await this.videoRepository.findOneBy({ public_id: publicId });
     if (!video) throw new VideoNotFoundException();

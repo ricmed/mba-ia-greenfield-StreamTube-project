@@ -407,4 +407,126 @@ describe('Videos (e2e)', () => {
       expect(response.body.error).toBe('UPLOAD_NOT_IN_PROGRESS');
     });
   });
+
+  describe('GET /videos/:publicId', () => {
+    /** Creates a draft and marks it ready as the worker would. */
+    async function readyVideo(accessToken: string): Promise<string> {
+      const draft = await request(app.getHttpServer())
+        .post('/videos')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send(VALID_BODY)
+        .expect(201);
+
+      const publicId = (draft.body as { id: string }).id;
+      await dataSource.query(
+        `UPDATE "videos"
+         SET "processing_status" = 'ready',
+             "duration_seconds" = 42,
+             "metadata" = $2,
+             "thumbnail_key" = 'videos/' || "id" || '/thumbnail.jpg'
+         WHERE "public_id" = $1`,
+        [publicId, JSON.stringify({ width: 1280, height: 720 })],
+      );
+
+      return publicId;
+    }
+
+    it('should return 200 with metadata and a thumbnail url for anonymous viewers', async () => {
+      const accessToken = await authenticate();
+      const publicId = await readyVideo(accessToken);
+
+      const response = await request(app.getHttpServer())
+        .get(`/videos/${publicId}`)
+        .expect(200);
+
+      expect(response.body.id).toBe(publicId);
+      expect(response.body.status).toBe('draft');
+      expect(response.body.processing_status).toBe('ready');
+      expect(response.body.duration_seconds).toBe(42);
+      expect(response.body.metadata.width).toBe(1280);
+      expect(response.body.thumbnail_url).toContain('X-Amz-Signature');
+    });
+
+    it('should let the owner see a video that is still processing', async () => {
+      const accessToken = await authenticate();
+      const draft = await request(app.getHttpServer())
+        .post('/videos')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send(VALID_BODY)
+        .expect(201);
+      const publicId = (draft.body as { id: string }).id;
+
+      const response = await request(app.getHttpServer())
+        .get(`/videos/${publicId}`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      expect(response.body.processing_status).toBe('uploading');
+      expect(response.body.thumbnail_url).toBeNull();
+    });
+
+    it('should hide a video still processing from an anonymous viewer', async () => {
+      const accessToken = await authenticate();
+      const draft = await request(app.getHttpServer())
+        .post('/videos')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send(VALID_BODY)
+        .expect(201);
+      const publicId = (draft.body as { id: string }).id;
+
+      const response = await request(app.getHttpServer())
+        .get(`/videos/${publicId}`)
+        .expect(404);
+
+      expect(response.body.error).toBe('VIDEO_NOT_FOUND');
+    });
+
+    it('should answer the same 404 for a draft of another channel and for an unknown id', async () => {
+      const ownerToken = await authenticate();
+      const draft = await request(app.getHttpServer())
+        .post('/videos')
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send(VALID_BODY)
+        .expect(201);
+      const publicId = (draft.body as { id: string }).id;
+      const otherToken = await authenticate();
+
+      const foreignDraft = await request(app.getHttpServer())
+        .get(`/videos/${publicId}`)
+        .set('Authorization', `Bearer ${otherToken}`)
+        .expect(404);
+
+      const unknown = await request(app.getHttpServer())
+        .get('/videos/doesnotexi')
+        .set('Authorization', `Bearer ${otherToken}`)
+        .expect(404);
+
+      expect(foreignDraft.body).toEqual(unknown.body);
+    });
+
+    it('should expose the failure reason to the owner', async () => {
+      const accessToken = await authenticate();
+      const draft = await request(app.getHttpServer())
+        .post('/videos')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send(VALID_BODY)
+        .expect(201);
+      const publicId = (draft.body as { id: string }).id;
+
+      await dataSource.query(
+        `UPDATE "videos"
+         SET "processing_status" = 'failed', "processing_error" = 'ffprobe rejected the file'
+         WHERE "public_id" = $1`,
+        [publicId],
+      );
+
+      const response = await request(app.getHttpServer())
+        .get(`/videos/${publicId}`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      expect(response.body.processing_status).toBe('failed');
+      expect(response.body.processing_error).toBe('ffprobe rejected the file');
+    });
+  });
 });

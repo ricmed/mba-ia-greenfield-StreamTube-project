@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
@@ -10,9 +11,11 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { JwtPayload } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Public } from '../auth/decorators/public.decorator';
 import { CompleteUploadDto } from './dto/complete-upload.dto';
 import { CreateVideoDto } from './dto/create-video.dto';
 import { SignUploadPartsDto } from './dto/sign-upload-parts.dto';
+import { VideoResponseDto } from './dto/video-response.dto';
 import { VideosService } from './videos.service';
 
 @ApiTags('videos')
@@ -104,5 +107,26 @@ export class VideosController {
     @Param('publicId') publicId: string,
   ): Promise<void> {
     await this.videosService.abortUpload(user.sub, publicId);
+  }
+
+  @Public()
+  @Get(':publicId')
+  async findOne(
+    @CurrentUser() user: JwtPayload | undefined,
+    @Param('publicId') publicId: string,
+  ): Promise<VideoResponseDto> {
+    const video = await this.videosService.findForViewer(publicId, user?.sub);
+
+    return {
+      id: video.public_id,
+      title: video.title,
+      status: video.status,
+      processing_status: video.processing_status,
+      processing_error: video.processing_error,
+      duration_seconds: video.duration_seconds,
+      metadata: video.metadata,
+      thumbnail_url: await this.videosService.buildThumbnailUrl(video),
+      created_at: video.created_at.toISOString(),
+    };
   }
 }

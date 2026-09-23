@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 9/14 completed
+**SIs:** 10/14 completed
 
 ### SI-03.1 — Infraestrutura: dependências, configuração e serviços no Compose
 - **Status:** completed
@@ -83,9 +83,12 @@
   - **Follow-ups fora de escopo:** (1) o Jest não encerra após as suítes de integração (provável handle aberto de Redis/TypeORM), deixando processos órfãos no container; (2) o primeiro boot do worker leva ~6,5 min compilando no bind mount do Windows.
 
 ### SI-03.10 — GET /videos/:publicId: consulta do vídeo e do ciclo de status
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 95/95 passing na rodada (videos.service.spec.ts + jwt-auth.guard.spec.ts = 28; videos.e2e-spec.ts + auth.e2e-spec.ts = 67)
+- **Observations:**
+  - **Mudança em código compartilhado da fase 02:** o `JwtAuthGuard` passou a resolver o token em rotas `@Public()` quando ele existe e é válido (best-effort), sem passar a exigi-lo. Era o único jeito de atender "resolução opcional do usuário" que o plano pede, já que o guard retornava antes de popular `request.user`. Rodei a suíte de auth inteira como regressão: 67 e2e verdes, nenhum 401/200 alterado.
+  - Rascunho de terceiro e id inexistente devolvem **respostas idênticas** (404 VIDEO_NOT_FOUND) — há teste comparando os dois corpos, porque um 403 confirmaria a existência do ID.
+  - O e2e marca o vídeo como `ready` direto no banco em vez de esperar o worker; o fluxo com worker real é o escopo do SI-03.13.
 
 ### SI-03.11 — Streaming e download via redirect presigned
 - **Status:** pending

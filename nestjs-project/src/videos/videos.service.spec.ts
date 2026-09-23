@@ -40,6 +40,7 @@ describe('VideosService', () => {
     createMultipartUpload: jest.Mock;
     abortMultipartUpload: jest.Mock;
     presignUploadParts: jest.Mock;
+    presignGetObject: jest.Mock;
     completeMultipartUpload: jest.Mock;
     headObject: jest.Mock;
   };
@@ -59,6 +60,7 @@ describe('VideosService', () => {
       createMultipartUpload: jest.fn().mockResolvedValue('upload-1'),
       abortMultipartUpload: jest.fn().mockResolvedValue(undefined),
       presignUploadParts: jest.fn().mockResolvedValue([]),
+      presignGetObject: jest.fn().mockResolvedValue('https://signed/thumb'),
       completeMultipartUpload: jest.fn().mockResolvedValue(undefined),
       headObject: jest.fn(),
     };
@@ -330,6 +332,76 @@ describe('VideosService', () => {
         service.abortUpload('user-1', 'abcdefghijk'),
       ).rejects.toBeInstanceOf(UploadNotInProgressException);
       expect(repository.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findForViewer', () => {
+    const readyVideo = {
+      id: 'video-1',
+      public_id: 'abcdefghijk',
+      channel_id: 'channel-1',
+      thumbnail_key: 'videos/video-1/thumbnail.jpg',
+      processing_status: VideoProcessingStatus.READY,
+    } as Video;
+
+    const draftVideo = {
+      ...readyVideo,
+      thumbnail_key: null,
+      processing_status: VideoProcessingStatus.PROCESSING,
+    } as Video;
+
+    it('should return a ready video to an anonymous viewer', async () => {
+      repository.findOneBy.mockResolvedValue(readyVideo);
+
+      await expect(service.findForViewer('abcdefghijk')).resolves.toBe(
+        readyVideo,
+      );
+      expect(channels.findByUserId).not.toHaveBeenCalled();
+    });
+
+    it('should return a video still processing to its owner', async () => {
+      repository.findOneBy.mockResolvedValue(draftVideo);
+
+      await expect(
+        service.findForViewer('abcdefghijk', 'user-1'),
+      ).resolves.toBe(draftVideo);
+    });
+
+    it('should hide a video still processing from an anonymous viewer', async () => {
+      repository.findOneBy.mockResolvedValue(draftVideo);
+
+      await expect(service.findForViewer('abcdefghijk')).rejects.toBeInstanceOf(
+        VideoNotFoundException,
+      );
+    });
+
+    it('should hide a video still processing from another channel', async () => {
+      repository.findOneBy.mockResolvedValue(draftVideo);
+      channels.findByUserId.mockResolvedValue({ id: 'another-channel' });
+
+      await expect(
+        service.findForViewer('abcdefghijk', 'user-2'),
+      ).rejects.toBeInstanceOf(VideoNotFoundException);
+    });
+  });
+
+  describe('buildThumbnailUrl', () => {
+    it('should sign the thumbnail when the worker produced one', async () => {
+      const url = await service.buildThumbnailUrl({
+        thumbnail_key: 'videos/video-1/thumbnail.jpg',
+      } as Video);
+
+      expect(url).toBe('https://signed/thumb');
+      expect(storage.presignGetObject).toHaveBeenCalledWith(
+        'videos/video-1/thumbnail.jpg',
+      );
+    });
+
+    it('should return null while there is no thumbnail yet', async () => {
+      await expect(
+        service.buildThumbnailUrl({ thumbnail_key: null } as Video),
+      ).resolves.toBeNull();
+      expect(storage.presignGetObject).not.toHaveBeenCalled();
     });
   });
 });
