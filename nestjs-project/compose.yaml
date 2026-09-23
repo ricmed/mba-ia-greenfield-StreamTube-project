@@ -1,6 +1,6 @@
 services:
   nestjs-api:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile.dev
     ports:
@@ -12,6 +12,27 @@ services:
         condition: service_healthy
       mailpit:
         condition: service_started
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  video-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - .:/home/node/app
+    # The worker is a separate process from the API (TD-06); it consumes the
+    # queue as soon as the stack is up.
+    command: ["npm", "run", "start:worker:dev"]
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   db:
     image: postgres:17
@@ -33,4 +54,50 @@ services:
       - "1025:1025"
       - "8025:8025"
 
+  # MinIO community images were pulled from Docker Hub in 2025; the Chainguard
+  # build is compiled from source and keeps receiving CVE patches (TD-05).
+  # Only `latest` is free, so the version is pinned by digest instead of tag.
+  minio:
+    image: cgr.dev/chainguard/minio@sha256:a3c850913c8b3713abeca590afb93744f5bbcd34a60850648d9a553801d1faad
+    command: ["server", "/data", "--console-address", ":9001"]
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=streamtube
+      - MINIO_ROOT_PASSWORD=streamtube123
+      # Browsers upload parts straight to the storage (TD-02), so the ETag of
+      # each part must be readable by JS.
+      - MINIO_API_CORS_ALLOW_ORIGIN=*
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
+  # noeviction + AOF are BullMQ's production requirements (library-refs.md).
+  redis:
+    image: redis:8-alpine
+    command:
+      [
+        "redis-server",
+        "--maxmemory-policy",
+        "noeviction",
+        "--appendonly",
+        "yes",
+      ]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  minio-data:
+  redis-data:
