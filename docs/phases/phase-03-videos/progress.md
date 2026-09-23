@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
-**Status:** in_progress
-**SIs:** 13/14 completed
+**Status:** completed
+**SIs:** 14/14 completed
 
 ### SI-03.1 — Infraestrutura: dependências, configuração e serviços no Compose
 - **Status:** completed
@@ -118,6 +118,10 @@
   - O download compara os bytes recebidos com os enviados, e a thumbnail é buscada de fato no storage (`image/jpeg`), em vez de só checar a presença da chave.
 
 ### SI-03.14 — Documentação de IA e diagrama de arquitetura
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** — (documentação; auditoria automatizada de cada arquivo, script npm e variável citados)
+- **Observations:**
+  - Auditei mecanicamente tudo que a documentação cita: 15 variáveis de ambiente, 7 arquivos e 11 scripts npm, cada um conferido contra `.env.example`, o disco e o `package.json`. **Três nomes de variável que eu havia escrito estavam errados** (`MAX_UPLOAD_SIZE_BYTES`, `UPLOAD_PART_SIZE_BYTES`, `URL_EXPIRATION_SECONDS`); os reais são prefixados com `VIDEO_`. É exatamente o que o critério de aceite do SI existe para pegar.
+  - **Duas afirmações herdadas estavam falsas e foram corrigidas:** o `nestjs-project/CLAUDE.md` dizia que o `npm run test:e2e` já estava configurado para rodar serial (só passou a ser verdade no commit `22c8a19`), e a seção de verificação de startup listava apenas o Postgres, ignorando MinIO e Redis.
+  - Corrigidas duas imprecisões do diagrama além do `TBD`: ele mostrava `API → Object Storage: Uploads`, sugerindo que os bytes do vídeo passam pela API — o oposto da decisão central da fase (TD-02). Agora a API assina URLs e abre/fecha uploads, e é o frontend que envia as partes.
+  - O `CLAUDE.md` da raiz ganhou a seção **Videos** com o fluxo de 5 passos, o modelo de estados ortogonais e a regra de visibilidade (404 em vez de 403 para não confirmar a existência do ID).

@@ -679,37 +679,37 @@ SI-03.2, SI-03.3 e SI-03.7 são independentes entre si e podem ser implementados
 
 ## Deliverables
 
-- [ ] SI-03.1 — Infraestrutura: dependências, configuração e serviços no Compose
-- [ ] SI-03.2 — StorageModule: cliente S3 e operações de object storage
-- [ ] SI-03.3 — Entidade Video e migration CreateVideos
-- [ ] SI-03.4 — VideosModule, exceções de domínio e geração do public_id
-- [ ] SI-03.5 — POST /videos: pré-cadastro do rascunho e início do multipart
-- [ ] SI-03.6 — POST /videos/:publicId/upload/parts: assinatura de partes sob demanda
-- [ ] SI-03.7 — Fila de processamento: BullMQ, Redis e producer
-- [ ] SI-03.8 — Conclusão e cancelamento do upload
-- [ ] SI-03.9 — Worker de vídeo: entrypoint, processor e FFmpeg
-- [ ] SI-03.10 — GET /videos/:publicId: consulta do vídeo e do ciclo de status
-- [ ] SI-03.11 — Streaming e download via redirect presigned
-- [ ] SI-03.12 — Documentação OpenAPI dos endpoints de vídeo
-- [ ] SI-03.13 — E2E do fluxo completo: upload, processamento e entrega
-- [ ] SI-03.14 — Documentação de IA e diagrama de arquitetura
+- [x] SI-03.1 — Infraestrutura: dependências, configuração e serviços no Compose
+- [x] SI-03.2 — StorageModule: cliente S3 e operações de object storage
+- [x] SI-03.3 — Entidade Video e migration CreateVideos
+- [x] SI-03.4 — VideosModule, exceções de domínio e geração do public_id
+- [x] SI-03.5 — POST /videos: pré-cadastro do rascunho e início do multipart
+- [x] SI-03.6 — POST /videos/:publicId/upload/parts: assinatura de partes sob demanda
+- [x] SI-03.7 — Fila de processamento: BullMQ, Redis e producer
+- [x] SI-03.8 — Conclusão e cancelamento do upload
+- [x] SI-03.9 — Worker de vídeo: entrypoint, processor e FFmpeg
+- [x] SI-03.10 — GET /videos/:publicId: consulta do vídeo e do ciclo de status
+- [x] SI-03.11 — Streaming e download via redirect presigned
+- [x] SI-03.12 — Documentação OpenAPI dos endpoints de vídeo
+- [x] SI-03.13 — E2E do fluxo completo: upload, processamento e entrega
+- [x] SI-03.14 — Documentação de IA e diagrama de arquitetura
 
 **Capacidades da fase (do `project-plan.md`):**
 
-- [ ] Object storage no Compose guardando vídeos e thumbnails (SI-03.1, SI-03.2)
-- [ ] Fila de processamento em segundo plano com worker dedicado (SI-03.1, SI-03.7, SI-03.9)
-- [ ] Upload de até 10GB sem que bytes passem pela API (SI-03.5, SI-03.6, SI-03.8)
-- [ ] Pré-cadastro do vídeo como rascunho ao iniciar o upload (SI-03.5)
-- [ ] Processamento automático com duração e metadados (SI-03.9)
-- [ ] Thumbnail gerada de um frame do vídeo (SI-03.9)
-- [ ] URL única por vídeo, sem conflito (SI-03.4)
-- [ ] Reprodução via streaming, com `Range`/`206`, sem download completo (SI-03.11)
-- [ ] Download do vídeo pelo usuário (SI-03.11)
+- [x] Object storage no Compose guardando vídeos e thumbnails (SI-03.1, SI-03.2)
+- [x] Fila de processamento em segundo plano com worker dedicado (SI-03.1, SI-03.7, SI-03.9)
+- [x] Upload de até 10GB sem que bytes passem pela API (SI-03.5, SI-03.6, SI-03.8)
+- [x] Pré-cadastro do vídeo como rascunho ao iniciar o upload (SI-03.5)
+- [x] Processamento automático com duração e metadados (SI-03.9)
+- [x] Thumbnail gerada de um frame do vídeo (SI-03.9)
+- [x] URL única por vídeo, sem conflito (SI-03.4)
+- [x] Reprodução via streaming, com `Range`/`206`, sem download completo (SI-03.11)
+- [x] Download do vídeo pelo usuário (SI-03.11)
 
 **Full test suites** _(todos os comandos rodam dentro do container, per `nestjs-project/CLAUDE.md`)_:
 
-- [ ] Testes unitários e de integração passam (`docker compose exec nestjs-api npm test -- --runInBand`)
-- [ ] Testes e2e passam (`docker compose exec nestjs-api npm run test:e2e`)
-- [ ] Type-check limpo (`docker compose exec nestjs-api npx tsc --noEmit`, exit 0)
-- [ ] Lint limpo (`docker compose exec nestjs-api npm run lint`)
-- [ ] Build compila (`docker compose exec nestjs-api npm run build`)
+- [x] Testes unitários e de integração passam (`docker compose exec nestjs-api npm test -- --runInBand`)
+- [x] Testes e2e passam (`docker compose exec nestjs-api npm run test:e2e`)
+- [x] Type-check limpo (`docker compose exec nestjs-api npx tsc --noEmit`, exit 0)
+- [x] Lint limpo (`docker compose exec nestjs-api npm run lint`)
+- [x] Build compila (`docker compose exec nestjs-api npm run build`)
